@@ -107,7 +107,7 @@ export function CatalogoClient({ products }: { products: UiProduct[] }) {
               view === v ? "bg-ink text-white" : "text-mut hover:text-ink",
             )}
           >
-            {v === "catalogo" ? "Catálogo" : "Ranking · ingreso potencial"}
+            {v === "catalogo" ? "Catálogo" : "Ranking"}
           </button>
         ))}
       </div>

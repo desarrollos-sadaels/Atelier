@@ -161,11 +161,6 @@ function DemoBlock({ title, rows }: { title: string; rows: DemographicRow[] }) {
 }
 
 function NotConnected() {
-  const steps = [
-    "En Meta for Developers creá/usá una App Business y copiá App ID y App Secret.",
-    "En Business Settings → Usuario del sistema, generá un token de larga duración con permiso ads_read y asignale la cuenta publicitaria.",
-    "Cargá META_APP_ID, META_APP_SECRET, META_ACCESS_TOKEN y META_AD_ACCOUNT_ID en el entorno.",
-  ];
   return (
     <>
       <PageHeader kicker="Métricas · Meta Ads" title="Métricas" />
@@ -175,14 +170,6 @@ function NotConnected() {
           Todavía no hay credenciales de Meta configuradas. Una vez conectada la cuenta, vas a ver
           gasto, alcance, impresiones, campañas activas y la demografía de cada campaña.
         </p>
-        <ol className="mt-6 max-w-[520px] space-y-2 text-left">
-          {steps.map((s, i) => (
-            <li key={i} className="flex gap-3 text-[12px] text-ink2">
-              <span className="mono text-mut">{i + 1}.</span>
-              <span>{s}</span>
-            </li>
-          ))}
-        </ol>
       </div>
     </>
   );
