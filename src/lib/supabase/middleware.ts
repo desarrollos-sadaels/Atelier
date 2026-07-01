@@ -6,7 +6,7 @@ const PROTECTED = [
   "/dashboard",
   "/catalogo",
   "/compras",
-  "/meta-ads",
+  "/metricas",
   "/configuracion",
 ];
 
