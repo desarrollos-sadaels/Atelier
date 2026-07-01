@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Google } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
-import { isAuthEnabled, ALLOWED_EMAIL_DOMAIN } from "@/lib/supabase/config";
+import { isAuthEnabled, ALLOWED_EMAIL_DOMAINS } from "@/lib/supabase/config";
 
 export function GoogleButton() {
   const router = useRouter();
@@ -18,9 +18,12 @@ export function GoogleButton() {
         provider: "google",
         options: {
           redirectTo: `${location.origin}/auth/callback`,
-          queryParams: ALLOWED_EMAIL_DOMAIN
-            ? { hd: ALLOWED_EMAIL_DOMAIN, prompt: "select_account" }
-            : { prompt: "select_account" },
+          // `hd` filtra el selector de Google a un único dominio Workspace;
+          // solo lo aplicamos si hay exactamente un dominio permitido.
+          queryParams:
+            ALLOWED_EMAIL_DOMAINS.length === 1
+              ? { hd: ALLOWED_EMAIL_DOMAINS[0], prompt: "select_account" }
+              : { prompt: "select_account" },
         },
       });
       if (error) setLoading(false);
