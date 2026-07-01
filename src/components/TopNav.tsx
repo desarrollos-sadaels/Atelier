@@ -12,14 +12,14 @@ const NAV = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Catálogo", href: "/catalogo" },
   { label: "Compras", href: "/compras" },
-  { label: "Meta Ads", href: "/meta-ads" },
+  { label: "Métricas", href: "/metricas" },
   { label: "Config", href: "/configuracion" },
 ];
 
 const NOTIFS = [
   { t: "Sin stock", d: "Remera Oversize Negra quedó en 0u — campaña pausada.", time: "5 min", alert: true },
   { t: "Stock bajo", d: "Buzo Hoodie Gris bajó a 4u (umbral 10).", time: "1 h", alert: false },
-  { t: "Meta Ads", d: "Sugerencia: pausar Always On · Medias Pack x3.", time: "3 h", alert: false },
+  { t: "Métricas", d: "Sugerencia: pausar Always On · Medias Pack x3.", time: "3 h", alert: false },
   { t: "Venta", d: "Nuevo pedido #2841 — 3 ítems · $38.700.", time: "hoy", alert: false },
 ];
 

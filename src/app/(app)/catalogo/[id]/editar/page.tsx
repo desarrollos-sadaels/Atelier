@@ -4,6 +4,7 @@ import { getProductById, formatARS } from "@/lib/queries";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { getProductVariants } from "@/lib/shopify/inventory";
 import { getProductBasics } from "@/lib/shopify/product";
+import { CATEGORY_OPTIONS, CATEGORY_SELECT_DEFAULT, normalizeCategory } from "@/lib/categories";
 
 const STATUS_ES: Record<string, string> = {
   active: "Activo",
@@ -50,10 +51,13 @@ export default async function EditProductPage({
     }
   }
 
+  const normalizedCat = normalizeCategory(p.category);
   const initial: EditInitial = {
     name: p.name,
     description,
-    category: p.category ?? "Seleccionar",
+    category: (CATEGORY_OPTIONS as readonly string[]).includes(normalizedCat)
+      ? normalizedCat
+      : CATEGORY_SELECT_DEFAULT,
     vendor: p.provider ?? "",
     status: STATUS_ES[statusCanonical] ?? "Borrador",
     alertThreshold: String(p.alert_threshold),

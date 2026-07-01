@@ -8,6 +8,9 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "**.supabase.co" },
     ],
   },
+  async redirects() {
+    return [{ source: "/meta-ads", destination: "/metricas", permanent: true }];
+  },
 };
 
 export default nextConfig;

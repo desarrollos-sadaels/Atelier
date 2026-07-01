@@ -11,6 +11,7 @@ import { Dropdown } from "@/components/Dropdown";
 import { ColorSwatch } from "@/components/ColorSwatch";
 import { Plus, X } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
+import { CATEGORY_OPTIONS, CATEGORY_SELECT_DEFAULT } from "@/lib/categories";
 import { cn } from "@/lib/cn";
 
 const TALLES = ["XS", "S", "M", "L", "XL", "XXL"];
@@ -18,7 +19,7 @@ const PALETTE = [
   "Negro", "Blanco", "Off white", "Gris", "Beige", "Marrón", "Rojo", "Bordó",
   "Rosa", "Amarillo", "Verde", "Azul", "Celeste", "Turquesa", "Violeta",
 ];
-const CATS = ["Seleccionar", "Remeras", "Buzos", "Camperas", "Accesorios", "Pantalones", "Vestidos", "Faldas"];
+const CATS = [CATEGORY_SELECT_DEFAULT, ...CATEGORY_OPTIONS];
 const ESTADOS = ["Borrador", "Activo", "Archivado"];
 
 type Img = { file: File; url: string };

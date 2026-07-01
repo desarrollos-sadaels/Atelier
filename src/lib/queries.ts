@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import type { Tables } from "@/lib/supabase/types";
 import type { UiProduct } from "@/lib/ui-types";
+import { normalizeCategory } from "@/lib/categories";
 
 export type { UiProduct };
 
@@ -27,8 +28,9 @@ function toUi(p: Tables<"products">): UiProduct {
     id: p.id,
     name: p.name,
     sku: p.sku ?? "—",
-    cat: p.category ?? "—",
+    cat: normalizeCategory(p.category),
     price: formatARS(p.price),
+    priceNum: p.price ?? 0,
     stock: `${p.stock}u`,
     out: p.stock === 0,
     shopify: p.stock === 0 ? "Sin stock" : (SHOPIFY_LABEL[p.shopify_status ?? "active"] ?? "Activo"),

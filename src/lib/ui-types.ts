@@ -4,6 +4,7 @@ export type UiProduct = {
   sku: string;
   cat: string;
   price: string;
+  priceNum: number;
   stock: string;
   out: boolean;
   shopify: string;

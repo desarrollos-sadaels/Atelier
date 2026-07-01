@@ -8,8 +8,9 @@ import { Card, CardTitle, Eyebrow, btnCls } from "@/components/ui";
 import { Field, Textarea } from "@/components/forms";
 import { Dropdown } from "@/components/Dropdown";
 import { ColorSwatch } from "@/components/ColorSwatch";
+import { CATEGORY_OPTIONS, CATEGORY_SELECT_DEFAULT } from "@/lib/categories";
 
-const CATS = ["Seleccionar", "Remeras", "Buzos", "Camperas", "Accesorios", "Pantalones", "Vestidos", "Faldas"];
+const CATS = [CATEGORY_SELECT_DEFAULT, ...CATEGORY_OPTIONS];
 const ESTADOS = ["Borrador", "Activo", "Archivado"];
 
 export type EditInitial = {
