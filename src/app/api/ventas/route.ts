@@ -43,6 +43,8 @@ export async function POST(req: NextRequest) {
 
   const soldAtRaw = str(body.soldAt);
   const soldAt = soldAtRaw && /^\d{4}-\d{2}-\d{2}$/.test(soldAtRaw) ? soldAtRaw : undefined;
+  const installmentsRaw = Math.trunc(Number(body.installments));
+  const installments = Number.isFinite(installmentsRaw) && installmentsRaw > 0 ? installmentsRaw : null;
   const customer = (body.customer ?? {}) as Record<string, unknown>;
   const isOtherBrand = Boolean(body.isOtherBrand);
   const productId = !isOtherBrand ? str(body.productId) : null;
@@ -67,8 +69,10 @@ export async function POST(req: NextRequest) {
     price,
     discount,
     payment_method: str(body.paymentMethod),
+    installments,
     pos: str(body.pos),
     invoiced: Boolean(body.invoiced),
+    invoice_path: Boolean(body.invoiced) ? str(body.invoicePath) : null,
     delivered: Boolean(body.delivered),
     notes: str(body.notes),
     stock_deducted: false,

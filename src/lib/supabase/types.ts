@@ -230,6 +230,12 @@ export type Database = {
         };
         Relationships: [];
       };
+      app_settings: {
+        Row: { key: string; value: Json; updated_at: string };
+        Insert: { key: string; value: Json; updated_at?: string };
+        Update: { key?: string; value?: Json; updated_at?: string };
+        Relationships: [];
+      };
       sales: {
         Row: {
           article: string;
@@ -243,6 +249,8 @@ export type Database = {
           delivered: boolean;
           discount: number;
           id: string;
+          installments: number | null;
+          invoice_path: string | null;
           invoiced: boolean;
           is_other_brand: boolean;
           notes: string | null;
@@ -270,6 +278,8 @@ export type Database = {
           delivered?: boolean;
           discount?: number;
           id?: string;
+          installments?: number | null;
+          invoice_path?: string | null;
           invoiced?: boolean;
           is_other_brand?: boolean;
           notes?: string | null;
@@ -297,6 +307,8 @@ export type Database = {
           delivered?: boolean;
           discount?: number;
           id?: string;
+          installments?: number | null;
+          invoice_path?: string | null;
           invoiced?: boolean;
           is_other_brand?: boolean;
           notes?: string | null;

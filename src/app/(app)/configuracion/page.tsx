@@ -20,6 +20,7 @@ const ROLE_BY_LABEL: Record<string, Role> = Object.fromEntries(
 
 const TABS = [
   "Cuenta",
+  "Ventas",
   "Integraciones",
   "Notificaciones",
   "Usuarios y permisos",
@@ -37,6 +38,7 @@ const integrations = [
 export default function ConfiguracionPage() {
   const [tab, setTab] = useState("Usuarios y permisos");
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [installments, setInstallments] = useState<number[]>([]);
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
@@ -54,6 +56,15 @@ export default function ConfiguracionPage() {
             role: normalizeRole(p.role),
           })),
         );
+      });
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "installment_options")
+      .maybeSingle()
+      .then(({ data }) => {
+        const raw = data?.value;
+        if (Array.isArray(raw)) setInstallments(raw.map(Number).filter((n) => n > 0));
       });
   }, []);
 
@@ -87,6 +98,7 @@ export default function ConfiguracionPage() {
         {/* panel */}
         <div>
           {tab === "Usuarios y permisos" && <UsuariosPanel users={users} />}
+          {tab === "Ventas" && <VentasSettingsPanel initial={installments} />}
           {tab === "Cuenta" && <CuentaPanel />}
           {tab === "Integraciones" && <IntegracionesPanel />}
           {tab === "Notificaciones" && <NotificacionesPanel />}
@@ -190,6 +202,101 @@ function UsuariosPanel({ users }: { users: UserRow[] }) {
             </div>
           </div>
         )}
+      </div>
+    </Card>
+  );
+}
+
+function VentasSettingsPanel({ initial }: { initial: number[] }) {
+  const [options, setOptions] = useState<number[]>(initial);
+  const [input, setInput] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => setOptions(initial), [initial]);
+
+  function add() {
+    const n = Math.trunc(Number(input));
+    if (!Number.isFinite(n) || n <= 0 || n > 60) return toast.error("Ingresá un número de cuotas válido (1–60)");
+    if (options.includes(n)) return toast.error("Esa cantidad ya está");
+    setOptions((cur) => [...cur, n].sort((a, b) => a - b));
+    setInput("");
+  }
+
+  async function save() {
+    if (saving) return;
+    if (!options.length) return toast.error("Dejá al menos una opción de cuotas");
+    setSaving(true);
+    const t = toast.loading("Guardando cuotas…");
+    try {
+      const res = await fetch("/api/settings/installments", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ options }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "No se pudo guardar");
+      setOptions(data.options);
+      toast.success("Cuotas actualizadas", { id: t });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo guardar", { id: t });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardTitle>Cuotas disponibles</CardTitle>
+      <div className="px-6 pb-6 pt-4">
+        <p className="text-[13px] text-mut">
+          Opciones que aparecen al elegir <b>Tarjeta</b> o <b>Mercado Pago</b> al registrar una venta.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {options.length === 0 ? (
+            <span className="text-[12px] text-mut">Sin opciones — agregá al menos una.</span>
+          ) : (
+            options.map((n) => (
+              <span
+                key={n}
+                className="mono flex items-center gap-2 rounded-full border border-line2 py-1 pl-3 pr-1.5 text-[12px]"
+              >
+                {n} {n === 1 ? "cuota" : "cuotas"}
+                <button
+                  onClick={() => setOptions((cur) => cur.filter((x) => x !== n))}
+                  className="grid h-4 w-4 place-items-center rounded-full bg-ink text-[9px] text-white"
+                  aria-label={`Quitar ${n}`}
+                >
+                  ✕
+                </button>
+              </span>
+            ))
+          )}
+        </div>
+        <div className="mt-4 flex items-end gap-3">
+          <div className="w-40">
+            <Field
+              label="AGREGAR CUOTAS"
+              type="number"
+              min={1}
+              max={60}
+              placeholder="Ej: 6"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  add();
+                }
+              }}
+            />
+          </div>
+          <button className={btnCls("ghost", "h-11")} onClick={add}>
+            Agregar
+          </button>
+          <button className={btnCls("primary", "ml-auto")} disabled={saving} onClick={save}>
+            {saving ? "Guardando…" : "Guardar"}
+          </button>
+        </div>
       </div>
     </Card>
   );

@@ -186,6 +186,9 @@ export function VentasClient({
                     <td className="mono py-3 pr-4 text-[11px]">{r.pos ?? "—"}</td>
                     <td className="mono py-3 pr-4 text-[11px]">
                       {r.payment_method ?? "—"}
+                      {r.installments ? (
+                        <span className="text-mut"> · {r.installments} {r.installments === 1 ? "cuota" : "cuotas"}</span>
+                      ) : null}
                       {Number(r.discount) > 0 && (
                         <span className="ml-1.5 text-acc">-{Math.round(Number(r.discount) * 100)}%</span>
                       )}
@@ -209,6 +212,17 @@ export function VentasClient({
                         >
                           <Chip tone="default">{r.invoiced ? "Facturado" : "Sin factura"}</Chip>
                         </button>
+                        {r.invoice_path && (
+                          <a
+                            href={`/api/ventas/${r.id}/factura`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mono text-[10px] text-acc hover:underline"
+                            title="Ver factura adjunta"
+                          >
+                            Factura ↗
+                          </a>
+                        )}
                         <span
                           className="flex items-center gap-1"
                           title={r.stock_deducted ? "Stock descontado en Shopify" : "No descuenta stock"}

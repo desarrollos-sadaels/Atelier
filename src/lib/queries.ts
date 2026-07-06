@@ -146,6 +146,26 @@ export function salesKpis(rows: SaleRow[]): SalesKpis {
   };
 }
 
+// ---------- settings ----------
+
+export const DEFAULT_INSTALLMENTS = [1, 3, 6, 12];
+
+/** Opciones de cuotas configurables (fallback a DEFAULT_INSTALLMENTS). */
+export async function getInstallmentOptions(): Promise<number[]> {
+  if (!isSupabaseConfigured()) return DEFAULT_INSTALLMENTS;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "installment_options")
+    .maybeSingle();
+  const raw = data?.value;
+  const list = Array.isArray(raw)
+    ? raw.map((n) => Math.trunc(Number(n))).filter((n) => Number.isFinite(n) && n > 0)
+    : [];
+  return list.length ? list : DEFAULT_INSTALLMENTS;
+}
+
 export type ActivityItem = { title: string; body: string | null; severity: string; date: string };
 
 export async function getRecentActivity(): Promise<ActivityItem[]> {

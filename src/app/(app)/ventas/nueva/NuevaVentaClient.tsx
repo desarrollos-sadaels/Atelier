@@ -3,12 +3,14 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Card, CardTitle, Eyebrow, btnCls } from "@/components/ui";
 import { Field, Textarea, Toggle } from "@/components/forms";
 import { Dropdown } from "@/components/Dropdown";
 import { ColorSwatch } from "@/components/ColorSwatch";
+import { X } from "@/components/icons";
+import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/cn";
 
 export type PickerProduct = {
@@ -28,16 +30,21 @@ type Variant = {
   inventoryItemId: string;
 };
 
-const PAGOS = [
-  "EFECTIVO",
-  "TRANSFERENCIA",
-  "QR",
-  "MP",
-  "TARJETA 1 CUOTA",
-  "TARJETA 3 CUOTAS",
-  "OTRO",
-];
+const PAGOS = ["EFECTIVO", "TRANSFERENCIA", "QR", "TARJETA", "MERCADOPAGO", "OTRO"];
+// Formas de pago que se cobran en cuotas → muestran el selector de cuotas.
+const PAGOS_CON_CUOTAS = new Set(["TARJETA", "MERCADOPAGO"]);
 const PUNTOS = ["LOCAL", "SHOPIFY", "CHAT", "FASHION X GLOBAL", "AMIGOS Y FAMILIA"];
+
+async function uploadInvoice(file: File): Promise<string> {
+  const supabase = createClient();
+  const ext = (file.name.split(".").pop() || "pdf").toLowerCase();
+  const path = `${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage
+    .from("invoices")
+    .upload(path, file, { upsert: false, contentType: file.type });
+  if (error) throw new Error(`No se pudo subir la factura: ${error.message}`);
+  return path;
+}
 
 const arsFmt = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -53,9 +60,11 @@ function today(): string {
 export function NuevaVentaClient({
   products,
   sellerName,
+  installmentOptions,
 }: {
   products: PickerProduct[];
   sellerName: string;
+  installmentOptions: number[];
 }) {
   const router = useRouter();
 
@@ -83,11 +92,15 @@ export function NuevaVentaClient({
   const [price, setPrice] = useState("");
   const [discount, setDiscount] = useState("0");
   const [pago, setPago] = useState("EFECTIVO");
+  const [cuotas, setCuotas] = useState(String(installmentOptions[0] ?? 1));
   const [punto, setPunto] = useState("LOCAL");
   const [invoiced, setInvoiced] = useState(false);
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [delivered, setDelivered] = useState(true);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const showCuotas = PAGOS_CON_CUOTAS.has(pago);
 
   const results = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -161,6 +174,13 @@ export function NuevaVentaClient({
     setSaving(true);
     const t = toast.loading("Registrando venta…");
     try {
+      // Subir la factura adjunta (si se marcó factura y se eligió archivo).
+      let invoicePath: string | undefined;
+      if (invoiced && invoiceFile) {
+        toast.loading("Subiendo factura…", { id: t });
+        invoicePath = await uploadInvoice(invoiceFile);
+      }
+
       const res = await fetch("/api/ventas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -170,8 +190,10 @@ export function NuevaVentaClient({
           price: priceNum,
           discount: discountNum,
           paymentMethod: pago,
+          installments: showCuotas ? Math.trunc(Number(cuotas)) || 1 : undefined,
           pos: punto,
           invoiced,
+          invoicePath,
           delivered,
           notes: notes.trim() || undefined,
           customer: {
@@ -488,12 +510,29 @@ export function NuevaVentaClient({
                 onChange={(e) => setDiscount(e.target.value)}
               />
               <Dropdown label="FORMA DE PAGO" value={pago} options={PAGOS} onChange={setPago} />
-              <Dropdown label="PUNTO DE VENTA" value={punto} options={PUNTOS} onChange={setPunto} />
+              {showCuotas ? (
+                <Dropdown
+                  label="CUOTAS"
+                  value={cuotas}
+                  options={installmentOptions.map(String)}
+                  onChange={setCuotas}
+                />
+              ) : (
+                <Dropdown label="PUNTO DE VENTA" value={punto} options={PUNTOS} onChange={setPunto} />
+              )}
+              {showCuotas && (
+                <div className="col-span-2">
+                  <Dropdown label="PUNTO DE VENTA" value={punto} options={PUNTOS} onChange={setPunto} />
+                </div>
+              )}
               <div className="col-span-2 border-t border-line pt-4">
                 <div className="flex items-center justify-between py-1.5">
                   <span className="text-[13px]">¿Se hizo factura?</span>
                   <Toggle on={invoiced} onChange={setInvoiced} />
                 </div>
+                {invoiced && (
+                  <InvoiceUpload file={invoiceFile} onFile={setInvoiceFile} />
+                )}
                 <div className="flex items-center justify-between py-1.5">
                   <span className="text-[13px]">Entregado</span>
                   <Toggle on={delivered} onChange={setDelivered} />
@@ -524,5 +563,48 @@ export function NuevaVentaClient({
         </div>
       </div>
     </>
+  );
+}
+
+function InvoiceUpload({
+  file,
+  onFile,
+}: {
+  file: File | null;
+  onFile: (f: File | null) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <div className="py-2">
+      <input
+        ref={input}
+        type="file"
+        accept="image/*,application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          onFile(e.target.files?.[0] ?? null);
+          e.target.value = "";
+        }}
+      />
+      {file ? (
+        <div className="flex items-center justify-between rounded-lg border border-line2 bg-panel px-3 py-2">
+          <span className="mono min-w-0 flex-1 truncate text-[11px]">{file.name}</span>
+          <button
+            onClick={() => onFile(null)}
+            className="ml-2 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-ink text-white"
+            aria-label="Quitar factura"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => input.current?.click()}
+          className="mono w-full rounded-lg border border-dashed border-line2 bg-panel px-3 py-2.5 text-[11px] text-mut transition-colors hover:border-ink/30"
+        >
+          Adjuntar factura · PDF o imagen
+        </button>
+      )}
+    </div>
   );
 }
