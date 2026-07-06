@@ -230,6 +230,105 @@ export type Database = {
         };
         Relationships: [];
       };
+      sales: {
+        Row: {
+          article: string;
+          brand: string | null;
+          color: string | null;
+          created_at: string;
+          customer_address: string | null;
+          customer_contact: string | null;
+          customer_dni: string | null;
+          customer_name: string | null;
+          delivered: boolean;
+          discount: number;
+          id: string;
+          invoiced: boolean;
+          is_other_brand: boolean;
+          notes: string | null;
+          payment_method: string | null;
+          pos: string | null;
+          price: number;
+          product_id: string | null;
+          qty: number;
+          seller_id: string | null;
+          seller_name: string | null;
+          sold_at: string;
+          stock_deducted: boolean;
+          talle: string | null;
+          variant_gid: string | null;
+        };
+        Insert: {
+          article: string;
+          brand?: string | null;
+          color?: string | null;
+          created_at?: string;
+          customer_address?: string | null;
+          customer_contact?: string | null;
+          customer_dni?: string | null;
+          customer_name?: string | null;
+          delivered?: boolean;
+          discount?: number;
+          id?: string;
+          invoiced?: boolean;
+          is_other_brand?: boolean;
+          notes?: string | null;
+          payment_method?: string | null;
+          pos?: string | null;
+          price: number;
+          product_id?: string | null;
+          qty?: number;
+          seller_id?: string | null;
+          seller_name?: string | null;
+          sold_at?: string;
+          stock_deducted?: boolean;
+          talle?: string | null;
+          variant_gid?: string | null;
+        };
+        Update: {
+          article?: string;
+          brand?: string | null;
+          color?: string | null;
+          created_at?: string;
+          customer_address?: string | null;
+          customer_contact?: string | null;
+          customer_dni?: string | null;
+          customer_name?: string | null;
+          delivered?: boolean;
+          discount?: number;
+          id?: string;
+          invoiced?: boolean;
+          is_other_brand?: boolean;
+          notes?: string | null;
+          payment_method?: string | null;
+          pos?: string | null;
+          price?: number;
+          product_id?: string | null;
+          qty?: number;
+          seller_id?: string | null;
+          seller_name?: string | null;
+          sold_at?: string;
+          stock_deducted?: boolean;
+          talle?: string | null;
+          variant_gid?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "sales_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "sales_seller_id_fkey";
+            columns: ["seller_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       profiles: {
         Row: {
           created_at: string;

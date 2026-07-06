@@ -4,6 +4,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
 import type { Tables } from "@/lib/supabase/types";
 import type { UiProduct } from "@/lib/ui-types";
 import { normalizeCategory } from "@/lib/categories";
+import { normalizeRole, type Role } from "@/lib/roles";
 
 export type { UiProduct };
 
@@ -76,6 +77,73 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     .slice(0, 5)
     .map((r) => ({ name: r.name, sku: r.sku ?? "—", qty: `${r.stock}u`, alert: r.stock === 0 }));
   return { total: rows.length, lowStock, outStock, alerts };
+}
+
+// ---------- perfil / rol ----------
+
+export type CurrentProfile = {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+};
+
+/** Perfil del usuario logueado (null en modo demo / sin sesión). */
+export async function getCurrentProfile(): Promise<CurrentProfile | null> {
+  if (!isSupabaseConfigured()) return null;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data } = await supabase
+    .from("profiles")
+    .select("full_name, email, role")
+    .eq("id", user.id)
+    .maybeSingle();
+  return {
+    id: user.id,
+    email: data?.email ?? user.email ?? "",
+    name: data?.full_name ?? user.email ?? "Usuario",
+    role: normalizeRole(data?.role),
+  };
+}
+
+// ---------- ventas ----------
+
+export type SaleRow = Tables<"sales">;
+
+/** Ventas de un mes (YYYY-MM), más recientes primero. */
+export async function getSales(month: string): Promise<SaleRow[]> {
+  if (!isSupabaseConfigured()) return [];
+  const supabase = await createClient();
+  const start = `${month}-01`;
+  const [y, m] = month.split("-").map(Number);
+  const end = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+  const { data } = await supabase
+    .from("sales")
+    .select("*")
+    .gte("sold_at", start)
+    .lt("sold_at", end)
+    .order("sold_at", { ascending: false })
+    .order("created_at", { ascending: false });
+  return data ?? [];
+}
+
+export type SalesKpis = {
+  totalAmount: number;
+  units: number;
+  pendingDelivery: number;
+  otherBrandUnits: number;
+};
+
+export function salesKpis(rows: SaleRow[]): SalesKpis {
+  return {
+    totalAmount: rows.reduce((acc, r) => acc + Number(r.price) * (1 - Number(r.discount)), 0),
+    units: rows.reduce((acc, r) => acc + r.qty, 0),
+    pendingDelivery: rows.filter((r) => !r.delivered).length,
+    otherBrandUnits: rows.filter((r) => r.is_other_brand).reduce((acc, r) => acc + r.qty, 0),
+  };
 }
 
 export type ActivityItem = { title: string; body: string | null; severity: string; date: string };

@@ -1,11 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config";
+import { canAccess, normalizeRole, ROLE_HOME } from "@/lib/roles";
 
 const PROTECTED = [
   "/dashboard",
   "/catalogo",
-  "/compras",
+  "/ventas",
   "/metricas",
   "/configuracion",
 ];
@@ -42,10 +43,27 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && path === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
-    return NextResponse.redirect(url);
+  if (user && (isProtected || path === "/login")) {
+    // Rol del usuario (equipo chico: un select liviano por request es aceptable).
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    const role = normalizeRole(profile?.role);
+    const home = ROLE_HOME[role];
+
+    if (path === "/login") {
+      const url = request.nextUrl.clone();
+      url.pathname = home;
+      return NextResponse.redirect(url);
+    }
+
+    if (isProtected && !canAccess(role, path)) {
+      const url = request.nextUrl.clone();
+      url.pathname = home;
+      return NextResponse.redirect(url);
+    }
   }
 
   return response;

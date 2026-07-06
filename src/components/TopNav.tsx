@@ -7,14 +7,13 @@ import { cn } from "@/lib/cn";
 import { Popover } from "@/components/Popover";
 import { Search, Bell, Menu } from "@/components/icons";
 import { Dot } from "@/components/ui";
+import { navForRole, ROLE_LABEL, type Role } from "@/lib/roles";
 
-const NAV = [
-  { label: "Dashboard", href: "/dashboard" },
-  { label: "Catálogo", href: "/catalogo" },
-  { label: "Compras", href: "/compras" },
-  { label: "Métricas", href: "/metricas" },
-  { label: "Config", href: "/configuracion" },
-];
+type NavProfile = {
+  name: string;
+  email: string;
+  role: Role;
+} | null;
 
 const NOTIFS = [
   { t: "Sin stock", d: "Remera Oversize Negra quedó en 0u — campaña pausada.", time: "5 min", alert: true },
@@ -23,11 +22,14 @@ const NOTIFS = [
   { t: "Venta", d: "Nuevo pedido #2841 — 3 ítems · $38.700.", time: "hoy", alert: false },
 ];
 
-export function TopNav() {
+export function TopNav({ profile }: { profile?: NavProfile }) {
   const pathname = usePathname();
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const role: Role = profile?.role ?? "admin"; // modo demo (sin auth): nav completa
+  const nav = navForRole(role);
 
   function submitSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -38,14 +40,14 @@ export function TopNav() {
     <header className="sticky top-0 z-30 border-b border-line bg-bg/90 backdrop-blur">
       <div className="mx-auto flex h-[72px] max-w-[1440px] items-center px-5 md:px-10">
         <Link
-          href="/dashboard"
+          href={nav[0]?.href ?? "/catalogo"}
           className="font-serif text-[22px] font-semibold tracking-tight"
         >
           Atelier
         </Link>
 
         <nav className="ml-16 hidden items-center gap-10 lg:flex">
-          {NAV.map((item) => {
+          {nav.map((item) => {
             const active =
               pathname === item.href || pathname.startsWith(item.href + "/");
             return (
@@ -123,7 +125,7 @@ export function TopNav() {
                   ))}
                 </ul>
                 <Link
-                  href="/dashboard"
+                  href={nav[0]?.href ?? "/catalogo"}
                   onClick={close}
                   className="mono block px-4 py-3 text-center text-[11px] text-acc hover:bg-panel"
                 >
@@ -138,29 +140,28 @@ export function TopNav() {
             align="right"
             triggerClass="h-9 w-9 rounded-full border border-line2 bg-tile hover:border-ink/40"
             trigger={<span className="sr-only">Usuario</span>}
-            panelClass="w-[210px] p-1.5"
+            panelClass="w-[230px] p-1.5"
           >
             {(close) => (
               <div>
                 <div className="border-b border-line px-3 py-2.5">
-                  <div className="text-[13px] font-medium">Luz Fernández</div>
-                  <div className="mono text-[10px] text-mut">Administradora</div>
+                  <div className="truncate text-[13px] font-medium">
+                    {profile?.name ?? "Invitado"}
+                  </div>
+                  <div className="mono truncate text-[10px] text-mut">
+                    {profile ? `${ROLE_LABEL[role]} · ${profile.email}` : "Modo demo"}
+                  </div>
                 </div>
                 <div className="pt-1.5">
-                  <Link
-                    href="/configuracion"
-                    onClick={close}
-                    className="block rounded-md px-3 py-2 text-[13px] text-ink2 hover:bg-panel"
-                  >
-                    Perfil
-                  </Link>
-                  <Link
-                    href="/configuracion"
-                    onClick={close}
-                    className="block rounded-md px-3 py-2 text-[13px] text-ink2 hover:bg-panel"
-                  >
-                    Configuración
-                  </Link>
+                  {role === "admin" && (
+                    <Link
+                      href="/configuracion"
+                      onClick={close}
+                      className="block rounded-md px-3 py-2 text-[13px] text-ink2 hover:bg-panel"
+                    >
+                      Configuración
+                    </Link>
+                  )}
                   <form action="/auth/signout" method="post">
                     <button
                       type="submit"
@@ -188,7 +189,7 @@ export function TopNav() {
       {/* mobile drawer */}
       {mobileOpen && (
         <nav className="border-t border-line px-5 py-3 lg:hidden">
-          {NAV.map((item) => {
+          {nav.map((item) => {
             const active =
               pathname === item.href || pathname.startsWith(item.href + "/");
             return (

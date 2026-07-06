@@ -9,7 +9,11 @@ const nextConfig: NextConfig = {
     ],
   },
   async redirects() {
-    return [{ source: "/meta-ads", destination: "/metricas", permanent: true }];
+    return [
+      { source: "/meta-ads", destination: "/metricas", permanent: true },
+      { source: "/compras", destination: "/ventas", permanent: true },
+      { source: "/compras/reporte", destination: "/ventas/reporte", permanent: true },
+    ];
   },
 };
 

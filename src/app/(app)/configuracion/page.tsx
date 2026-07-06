@@ -5,20 +5,18 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardTitle, Chip, btnCls } from "@/components/ui";
 import { Field, ToggleRow } from "@/components/forms";
-import { Plus, Dots } from "@/components/icons";
+import { Plus } from "@/components/icons";
+import { Dropdown } from "@/components/Dropdown";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { ROLE_LABEL, ROLES, normalizeRole, type Role } from "@/lib/roles";
 import { cn } from "@/lib/cn";
 
-type UserRow = { name: string; email: string; role: string };
+type UserRow = { id: string; name: string; email: string; role: Role };
 
-const ROLE_LABEL: Record<string, string> = {
-  admin: "Administrador",
-  media: "Media Manager",
-  pauta: "Pauta",
-  compras: "Compras",
-  viewer: "Solo lectura",
-};
+const ROLE_BY_LABEL: Record<string, Role> = Object.fromEntries(
+  ROLES.map((r) => [ROLE_LABEL[r], r]),
+) as Record<string, Role>;
 
 const TABS = [
   "Cuenta",
@@ -45,14 +43,15 @@ export default function ConfiguracionPage() {
     const supabase = createClient();
     supabase
       .from("profiles")
-      .select("full_name,email,role")
+      .select("id,full_name,email,role")
       .order("created_at", { ascending: true })
       .then(({ data }) => {
         setUsers(
           (data ?? []).map((p) => ({
+            id: p.id,
             name: p.full_name || p.email || "—",
             email: p.email || "—",
-            role: ROLE_LABEL[p.role] ?? p.role,
+            role: normalizeRole(p.role),
           })),
         );
       });
@@ -102,19 +101,49 @@ export default function ConfiguracionPage() {
 }
 
 function UsuariosPanel({ users }: { users: UserRow[] }) {
+  const [rows, setRows] = useState(users);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => setRows(users), [users]);
+
+  async function changeRole(user: UserRow, label: string) {
+    const role = ROLE_BY_LABEL[label];
+    if (!role || role === user.role || busy) return;
+    setBusy(user.id);
+    try {
+      const res = await fetch("/api/users/role", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id, role }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "No se pudo cambiar el rol");
+      setRows((cur) => cur.map((u) => (u.id === user.id ? { ...u, role } : u)));
+      toast.success(`${user.name} ahora es ${ROLE_LABEL[role]}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo cambiar el rol");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <Card>
       <div className="flex items-center justify-between px-6 pt-6">
         <span className="mono text-[11px] text-mut">Usuarios y permisos</span>
         <button
           className={btnCls("primary", "h-9 text-[12px]")}
-          onClick={() => toast.success("Invitación enviada")}
+          onClick={() =>
+            toast("Invitar usuario", {
+              description: "Compartile el link de la app: entra con Google y queda como Vendedor.",
+            })
+          }
         >
           <Plus className="h-4 w-4" /> Invitar usuario
         </button>
       </div>
       <div className="px-6 pb-6">
-        {users.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="mt-6 text-[13px] text-mut">
             Todavía no hay usuarios. Aparecen al iniciar sesión por primera vez.
           </p>
@@ -123,7 +152,7 @@ function UsuariosPanel({ users }: { users: UserRow[] }) {
             <table className="mt-4 w-full min-w-[560px] text-left">
               <thead>
                 <tr className="mono text-[9px] text-mut2">
-                  {["Usuario", "Email", "Rol", "Estado", ""].map((h, i) => (
+                  {["Usuario", "Email", "Rol", "Estado"].map((h, i) => (
                     <th key={i} className="border-b border-line py-3 font-normal">
                       {h}
                     </th>
@@ -131,8 +160,8 @@ function UsuariosPanel({ users }: { users: UserRow[] }) {
                 </tr>
               </thead>
               <tbody>
-                {users.map((u) => (
-                  <tr key={u.email} className="border-b border-line">
+                {rows.map((u) => (
+                  <tr key={u.id} className="border-b border-line">
                     <td className="py-4">
                       <div className="flex items-center gap-3">
                         <span className="h-10 w-10 rounded-full border border-line2 bg-tile" />
@@ -140,21 +169,24 @@ function UsuariosPanel({ users }: { users: UserRow[] }) {
                       </div>
                     </td>
                     <td className="mono text-[12px] text-mut">{u.email}</td>
-                    <td className="text-[13px] text-ink2">{u.role}</td>
+                    <td className={cn("pr-4", busy === u.id && "pointer-events-none opacity-50")}>
+                      <Dropdown
+                        value={ROLE_LABEL[u.role]}
+                        options={ROLES.map((r) => ROLE_LABEL[r])}
+                        onChange={(label) => changeRole(u, label)}
+                        variant="pill"
+                      />
+                    </td>
                     <td>
                       <Chip tone="default">Activa</Chip>
-                    </td>
-                    <td className="text-right">
-                      <button className="text-mut2 hover:text-ink" aria-label="Acciones">
-                        <Dots className="h-4 w-4" />
-                      </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <div className="mono mt-5 text-[11px] text-mut">
-              {users.length} usuario{users.length === 1 ? "" : "s"}
+              {rows.length} usuario{rows.length === 1 ? "" : "s"} · Los nuevos ingresan como
+              Vendedor
             </div>
           </div>
         )}

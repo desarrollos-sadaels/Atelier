@@ -7,18 +7,21 @@ import { Card, CardTitle, Eyebrow, btnCls } from "@/components/ui";
 import { Field, Toggle } from "@/components/forms";
 import { Dropdown } from "@/components/Dropdown";
 import { ChevronLeft, Download } from "@/components/icons";
+import { CATEGORY_OPTIONS } from "@/lib/categories";
 import { cn } from "@/lib/cn";
 
 const ranges = ["Hoy", "7 días", "30 días", "Mes", "Custom"];
 const formats = ["CSV", "XLSX", "PDF"];
-const summary = [
-  { k: "Ventas", v: "—", acc: false },
-  { k: "Unidades", v: "—" },
-  { k: "Pedidos", v: "—" },
-  { k: "Ticket prom.", v: "—" },
-];
 
-export default function ReportePage() {
+type SummaryItem = { k: string; v: string; acc?: boolean };
+
+export function ReporteClient({
+  summary,
+  hasSales,
+}: {
+  summary: SummaryItem[];
+  hasSales: boolean;
+}) {
   const [range, setRange] = useState("30 días");
   const [format, setFormat] = useState("XLSX");
   const [tipo, setTipo] = useState("Ventas por producto");
@@ -28,8 +31,10 @@ export default function ReportePage() {
   const [email, setEmail] = useState(false);
 
   function generar() {
-    toast("Sin ventas para exportar todavía", {
-      description: "El reporte se va a poblar cuando entren ventas por Shopify.",
+    toast(hasSales ? "Export en construcción" : "Sin ventas para exportar todavía", {
+      description: hasSales
+        ? "La descarga CSV/XLSX/PDF llega en una próxima fase."
+        : "Registrá ventas desde la pantalla de Ventas para poblar el reporte.",
     });
   }
 
@@ -37,13 +42,13 @@ export default function ReportePage() {
     <>
       <div className="flex items-end justify-between gap-6 pt-9 pb-1">
         <div>
-          <Eyebrow className="mb-3">Compras / Reporte de ventas</Eyebrow>
+          <Eyebrow className="mb-3">Ventas / Reporte</Eyebrow>
           <h1 className="font-serif text-[44px] leading-none tracking-tight">
             Reporte de ventas
           </h1>
         </div>
-        <Link href="/compras" className={btnCls("ghost")}>
-          <ChevronLeft className="h-4 w-4" /> Volver a Compras
+        <Link href="/ventas" className={btnCls("ghost")}>
+          <ChevronLeft className="h-4 w-4" /> Volver a Ventas
         </Link>
       </div>
 
@@ -81,7 +86,7 @@ export default function ReportePage() {
               <Field label="DESDE" placeholder="01/06/2026" />
               <Field label="HASTA" placeholder="25/06/2026" />
             </div>
-            <Dropdown label="CATEGORÍA" value={cat} options={["Todas", "Remeras", "Buzos", "Camperas", "Accesorios", "Pantalones"]} onChange={setCat} />
+            <Dropdown label="CATEGORÍA" value={cat} options={["Todas", ...CATEGORY_OPTIONS]} onChange={setCat} />
             <Dropdown label="CANAL" value={canal} options={["Shopify + Manual", "Solo Shopify", "Solo Manual"]} onChange={setCanal} />
             <Dropdown label="AGRUPAR POR" value={group} options={["Día", "Semana", "Mes"]} onChange={setGroup} />
             <div>
@@ -139,9 +144,13 @@ export default function ReportePage() {
             <div className="hair" />
             <div className="mt-6 grid h-[220px] place-items-center rounded-[4px] border border-dashed border-line text-center">
               <div>
-                <div className="font-serif text-[18px]">Sin ventas en este período</div>
+                <div className="font-serif text-[18px]">
+                  {hasSales ? "Ventas de los últimos 30 días" : "Sin ventas en este período"}
+                </div>
                 <p className="mono mt-2 text-[11px] text-mut">
-                  Generá el reporte cuando haya ventas sincronizadas desde Shopify
+                  {hasSales
+                    ? "El detalle exportable (CSV / XLSX / PDF) llega en una próxima fase."
+                    : "Registrá ventas desde la pantalla de Ventas para poblar el reporte."}
                 </p>
               </div>
             </div>
