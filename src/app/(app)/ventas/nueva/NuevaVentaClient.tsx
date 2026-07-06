@@ -11,6 +11,7 @@ import { Dropdown } from "@/components/Dropdown";
 import { ColorSwatch } from "@/components/ColorSwatch";
 import { X } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
+import type { PaymentMethod } from "@/lib/payments";
 import { cn } from "@/lib/cn";
 
 export type PickerProduct = {
@@ -30,9 +31,6 @@ type Variant = {
   inventoryItemId: string;
 };
 
-const PAGOS = ["EFECTIVO", "TRANSFERENCIA", "QR", "TARJETA", "MERCADOPAGO", "OTRO"];
-// Formas de pago que se cobran en cuotas → muestran el selector de cuotas.
-const PAGOS_CON_CUOTAS = new Set(["TARJETA", "MERCADOPAGO"]);
 const PUNTOS = ["LOCAL", "SHOPIFY", "CHAT", "FASHION X GLOBAL", "AMIGOS Y FAMILIA"];
 
 async function uploadInvoice(file: File): Promise<string> {
@@ -60,13 +58,14 @@ function today(): string {
 export function NuevaVentaClient({
   products,
   sellerName,
-  installmentOptions,
+  paymentMethods,
 }: {
   products: PickerProduct[];
   sellerName: string;
-  installmentOptions: number[];
+  paymentMethods: PaymentMethod[];
 }) {
   const router = useRouter();
+  const PAGOS = paymentMethods.map((m) => m.name);
 
   // artículo
   const [otherBrand, setOtherBrand] = useState(false);
@@ -91,8 +90,8 @@ export function NuevaVentaClient({
   const [qty, setQty] = useState("1");
   const [price, setPrice] = useState("");
   const [discount, setDiscount] = useState("0");
-  const [pago, setPago] = useState("EFECTIVO");
-  const [cuotas, setCuotas] = useState(String(installmentOptions[0] ?? 1));
+  const [pago, setPago] = useState(paymentMethods[0]?.name ?? "EFECTIVO");
+  const [cuotas, setCuotas] = useState("");
   const [punto, setPunto] = useState("LOCAL");
   const [invoiced, setInvoiced] = useState(false);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
@@ -100,7 +99,15 @@ export function NuevaVentaClient({
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const showCuotas = PAGOS_CON_CUOTAS.has(pago);
+  const selectedMethod = paymentMethods.find((m) => m.name === pago) ?? null;
+  const cuotaOptions = selectedMethod?.installments ?? [];
+  const showCuotas = cuotaOptions.length > 0;
+
+  function changePago(name: string) {
+    setPago(name);
+    const m = paymentMethods.find((x) => x.name === name);
+    setCuotas(m?.installments?.length ? String(m.installments[0]) : "");
+  }
 
   const results = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -190,7 +197,7 @@ export function NuevaVentaClient({
           price: priceNum,
           discount: discountNum,
           paymentMethod: pago,
-          installments: showCuotas ? Math.trunc(Number(cuotas)) || 1 : undefined,
+          installments: showCuotas ? Math.trunc(Number(cuotas)) || cuotaOptions[0] : undefined,
           pos: punto,
           invoiced,
           invoicePath,
@@ -509,12 +516,12 @@ export function NuevaVentaClient({
                 value={discount}
                 onChange={(e) => setDiscount(e.target.value)}
               />
-              <Dropdown label="FORMA DE PAGO" value={pago} options={PAGOS} onChange={setPago} />
+              <Dropdown label="FORMA DE PAGO" value={pago} options={PAGOS} onChange={changePago} />
               {showCuotas ? (
                 <Dropdown
                   label="CUOTAS"
                   value={cuotas}
-                  options={installmentOptions.map(String)}
+                  options={cuotaOptions.map(String)}
                   onChange={setCuotas}
                 />
               ) : (

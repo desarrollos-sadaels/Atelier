@@ -5,11 +5,13 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardTitle, Chip, btnCls } from "@/components/ui";
 import { Field, ToggleRow } from "@/components/forms";
-import { Plus } from "@/components/icons";
+import { Plus, X } from "@/components/icons";
 import { Dropdown } from "@/components/Dropdown";
+import { Toggle } from "@/components/forms";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { ROLE_LABEL, ROLES, normalizeRole, type Role } from "@/lib/roles";
+import { parsePaymentMethods, DEFAULT_PAYMENT_METHODS, type PaymentMethod } from "@/lib/payments";
 import { cn } from "@/lib/cn";
 
 type UserRow = { id: string; name: string; email: string; role: Role };
@@ -38,7 +40,7 @@ const integrations = [
 export default function ConfiguracionPage() {
   const [tab, setTab] = useState("Usuarios y permisos");
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [installments, setInstallments] = useState<number[]>([]);
+  const [methods, setMethods] = useState<PaymentMethod[]>(DEFAULT_PAYMENT_METHODS);
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
@@ -60,11 +62,10 @@ export default function ConfiguracionPage() {
     supabase
       .from("app_settings")
       .select("value")
-      .eq("key", "installment_options")
+      .eq("key", "payment_methods")
       .maybeSingle()
       .then(({ data }) => {
-        const raw = data?.value;
-        if (Array.isArray(raw)) setInstallments(raw.map(Number).filter((n) => n > 0));
+        if (data?.value) setMethods(parsePaymentMethods(data.value));
       });
   }, []);
 
@@ -98,7 +99,7 @@ export default function ConfiguracionPage() {
         {/* panel */}
         <div>
           {tab === "Usuarios y permisos" && <UsuariosPanel users={users} />}
-          {tab === "Ventas" && <VentasSettingsPanel initial={installments} />}
+          {tab === "Ventas" && <PagosSettingsPanel initial={methods} />}
           {tab === "Cuenta" && <CuentaPanel />}
           {tab === "Integraciones" && <IntegracionesPanel />}
           {tab === "Notificaciones" && <NotificacionesPanel />}
@@ -207,36 +208,41 @@ function UsuariosPanel({ users }: { users: UserRow[] }) {
   );
 }
 
-function VentasSettingsPanel({ initial }: { initial: number[] }) {
-  const [options, setOptions] = useState<number[]>(initial);
-  const [input, setInput] = useState("");
+function PagosSettingsPanel({ initial }: { initial: PaymentMethod[] }) {
+  const [methods, setMethods] = useState<PaymentMethod[]>(initial);
+  const [newName, setNewName] = useState("");
+  const [newCuotas, setNewCuotas] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => setOptions(initial), [initial]);
+  useEffect(() => setMethods(initial), [initial]);
 
-  function add() {
-    const n = Math.trunc(Number(input));
-    if (!Number.isFinite(n) || n <= 0 || n > 60) return toast.error("Ingresá un número de cuotas válido (1–60)");
-    if (options.includes(n)) return toast.error("Esa cantidad ya está");
-    setOptions((cur) => [...cur, n].sort((a, b) => a - b));
-    setInput("");
+  const update = (i: number, patch: Partial<PaymentMethod>) =>
+    setMethods((cur) => cur.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
+
+  function addMethod() {
+    const name = newName.trim().toUpperCase();
+    if (!name) return toast.error("Ingresá el nombre del método");
+    if (methods.some((m) => m.name.toUpperCase() === name)) return toast.error("Ese método ya existe");
+    setMethods((cur) => [...cur, { name, installments: newCuotas ? [1] : null }]);
+    setNewName("");
+    setNewCuotas(false);
   }
 
   async function save() {
     if (saving) return;
-    if (!options.length) return toast.error("Dejá al menos una opción de cuotas");
+    if (!methods.length) return toast.error("Dejá al menos un método de pago");
     setSaving(true);
-    const t = toast.loading("Guardando cuotas…");
+    const t = toast.loading("Guardando métodos de pago…");
     try {
-      const res = await fetch("/api/settings/installments", {
+      const res = await fetch("/api/settings/payment-methods", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ options }),
+        body: JSON.stringify({ methods }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "No se pudo guardar");
-      setOptions(data.options);
-      toast.success("Cuotas actualizadas", { id: t });
+      setMethods(data.methods);
+      toast.success("Métodos de pago actualizados", { id: t });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "No se pudo guardar", { id: t });
     } finally {
@@ -246,59 +252,116 @@ function VentasSettingsPanel({ initial }: { initial: number[] }) {
 
   return (
     <Card>
-      <CardTitle>Cuotas disponibles</CardTitle>
-      <div className="px-6 pb-6 pt-4">
+      <div className="flex items-center justify-between px-6 pt-6">
+        <span className="mono text-[11px] text-mut">Métodos de pago y cuotas</span>
+        <button className={btnCls("primary", "h-9 text-[12px]")} disabled={saving} onClick={save}>
+          {saving ? "Guardando…" : "Guardar"}
+        </button>
+      </div>
+      <div className="px-6 pb-6 pt-2">
         <p className="text-[13px] text-mut">
-          Opciones que aparecen al elegir <b>Tarjeta</b> o <b>Mercado Pago</b> al registrar una venta.
+          Definí los métodos disponibles al registrar una venta. Los que cobran en cuotas
+          (ej. Tarjeta, Mercado Pago) muestran su propio selector de cuotas.
         </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {options.length === 0 ? (
-            <span className="text-[12px] text-mut">Sin opciones — agregá al menos una.</span>
-          ) : (
-            options.map((n) => (
-              <span
-                key={n}
-                className="mono flex items-center gap-2 rounded-full border border-line2 py-1 pl-3 pr-1.5 text-[12px]"
-              >
-                {n} {n === 1 ? "cuota" : "cuotas"}
+
+        <div className="mt-5 space-y-3">
+          {methods.map((m, i) => (
+            <div key={i} className="rounded-lg border border-line2 p-3">
+              <div className="flex items-center gap-3">
+                <span className="flex-1 text-[14px] font-medium">{m.name}</span>
+                <span className="mono text-[10px] text-mut">Cobra en cuotas</span>
+                <Toggle
+                  on={m.installments !== null}
+                  onChange={(on) => update(i, { installments: on ? m.installments ?? [1, 3, 6, 12] : null })}
+                />
                 <button
-                  onClick={() => setOptions((cur) => cur.filter((x) => x !== n))}
-                  className="grid h-4 w-4 place-items-center rounded-full bg-ink text-[9px] text-white"
-                  aria-label={`Quitar ${n}`}
+                  onClick={() => setMethods((cur) => cur.filter((_, idx) => idx !== i))}
+                  className="grid h-6 w-6 place-items-center rounded-full border border-line2 text-mut hover:border-acc hover:text-acc"
+                  aria-label={`Quitar ${m.name}`}
                 >
-                  ✕
+                  <X className="h-3 w-3" />
                 </button>
-              </span>
-            ))
-          )}
+              </div>
+              {m.installments !== null && (
+                <CuotasEditor
+                  value={m.installments}
+                  onChange={(list) => update(i, { installments: list })}
+                />
+              )}
+            </div>
+          ))}
         </div>
-        <div className="mt-4 flex items-end gap-3">
-          <div className="w-40">
+
+        <div className="mt-5 flex items-end gap-3 border-t border-line pt-5">
+          <div className="flex-1">
             <Field
-              label="AGREGAR CUOTAS"
-              type="number"
-              min={1}
-              max={60}
-              placeholder="Ej: 6"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
+              label="NUEVO MÉTODO"
+              placeholder="Ej: DÓLARES"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  add();
+                  addMethod();
                 }
               }}
             />
           </div>
-          <button className={btnCls("ghost", "h-11")} onClick={add}>
-            Agregar
-          </button>
-          <button className={btnCls("primary", "ml-auto")} disabled={saving} onClick={save}>
-            {saving ? "Guardando…" : "Guardar"}
+          <div className="flex items-center gap-2 pb-2.5">
+            <span className="mono text-[10px] text-mut">EN CUOTAS</span>
+            <Toggle on={newCuotas} onChange={setNewCuotas} />
+          </div>
+          <button className={btnCls("ghost", "h-11")} onClick={addMethod}>
+            <Plus className="h-4 w-4" /> Agregar
           </button>
         </div>
       </div>
     </Card>
+  );
+}
+
+function CuotasEditor({ value, onChange }: { value: number[]; onChange: (v: number[]) => void }) {
+  const [input, setInput] = useState("");
+  function add() {
+    const n = Math.trunc(Number(input));
+    if (!Number.isFinite(n) || n <= 0 || n > 60) return toast.error("Cuotas inválidas (1–60)");
+    if (value.includes(n)) return;
+    onChange([...value, n].sort((a, b) => a - b));
+    setInput("");
+  }
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+      {value.map((n) => (
+        <span
+          key={n}
+          className="mono flex items-center gap-1.5 rounded-full border border-line2 py-1 pl-2.5 pr-1 text-[11px]"
+        >
+          {n}
+          <button
+            onClick={() => onChange(value.filter((x) => x !== n))}
+            className="grid h-4 w-4 place-items-center rounded-full bg-ink text-[8px] text-white"
+            aria-label={`Quitar ${n}`}
+          >
+            ✕
+          </button>
+        </span>
+      ))}
+      <input
+        type="number"
+        min={1}
+        max={60}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            add();
+          }
+        }}
+        placeholder="+ cuota"
+        className="mono h-8 w-20 rounded-full border border-line2 px-3 text-[11px] outline-none focus:border-ink/40"
+      />
+    </div>
   );
 }
 

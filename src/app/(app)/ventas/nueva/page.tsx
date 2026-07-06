@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentProfile, getProducts, getInstallmentOptions } from "@/lib/queries";
+import { getCurrentProfile, getProducts, getPaymentMethods } from "@/lib/queries";
 import { NuevaVentaClient, type PickerProduct } from "./NuevaVentaClient";
 
 export default async function NuevaVentaPage() {
@@ -7,10 +7,7 @@ export default async function NuevaVentaPage() {
   // Medios solo trackea ventas; la carga es de admin/vendedor.
   if (profile && profile.role === "medios") redirect("/ventas");
 
-  const [products, installmentOptions] = await Promise.all([
-    getProducts(),
-    getInstallmentOptions(),
-  ]);
+  const [products, paymentMethods] = await Promise.all([getProducts(), getPaymentMethods()]);
   const picker: PickerProduct[] = products.map((p) => ({
     id: p.id,
     name: p.name,
@@ -24,7 +21,7 @@ export default async function NuevaVentaPage() {
     <NuevaVentaClient
       products={picker}
       sellerName={profile?.name ?? "—"}
-      installmentOptions={installmentOptions}
+      paymentMethods={paymentMethods}
     />
   );
 }

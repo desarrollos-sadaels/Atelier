@@ -5,6 +5,7 @@ import type { Tables } from "@/lib/supabase/types";
 import type { UiProduct } from "@/lib/ui-types";
 import { normalizeCategory } from "@/lib/categories";
 import { normalizeRole, type Role } from "@/lib/roles";
+import { parsePaymentMethods, DEFAULT_PAYMENT_METHODS, type PaymentMethod } from "@/lib/payments";
 
 export type { UiProduct };
 
@@ -148,22 +149,16 @@ export function salesKpis(rows: SaleRow[]): SalesKpis {
 
 // ---------- settings ----------
 
-export const DEFAULT_INSTALLMENTS = [1, 3, 6, 12];
-
-/** Opciones de cuotas configurables (fallback a DEFAULT_INSTALLMENTS). */
-export async function getInstallmentOptions(): Promise<number[]> {
-  if (!isSupabaseConfigured()) return DEFAULT_INSTALLMENTS;
+/** Métodos de pago configurables (fallback a DEFAULT_PAYMENT_METHODS). */
+export async function getPaymentMethods(): Promise<PaymentMethod[]> {
+  if (!isSupabaseConfigured()) return DEFAULT_PAYMENT_METHODS;
   const supabase = await createClient();
   const { data } = await supabase
     .from("app_settings")
     .select("value")
-    .eq("key", "installment_options")
+    .eq("key", "payment_methods")
     .maybeSingle();
-  const raw = data?.value;
-  const list = Array.isArray(raw)
-    ? raw.map((n) => Math.trunc(Number(n))).filter((n) => Number.isFinite(n) && n > 0)
-    : [];
-  return list.length ? list : DEFAULT_INSTALLMENTS;
+  return parsePaymentMethods(data?.value);
 }
 
 export type ActivityItem = { title: string; body: string | null; severity: string; date: string };

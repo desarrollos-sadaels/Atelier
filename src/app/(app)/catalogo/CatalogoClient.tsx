@@ -13,7 +13,7 @@ import type { UiProduct } from "@/lib/ui-types";
 import { cn } from "@/lib/cn";
 
 const metaColor = { a: "text-ink", p: "text-acc", n: "text-mut" } as const;
-const STOCKS = ["Todos", "En stock", "Stock bajo", "Sin stock"];
+const STOCKS = ["Todos", "Stock", "Sin stock"];
 const SHOPS = ["Todos", "Activo", "Sin stock", "Borrador"];
 const PAGE_SIZE = 20;
 const TOP_HIGHLIGHT = 10;
@@ -26,6 +26,8 @@ const arsFmt = new Intl.NumberFormat("es-AR", {
 const fmtARS = (n: number) => arsFmt.format(n);
 
 type View = "catalogo" | "ranking";
+type SortCol = "stock" | "precio";
+type Sort = { col: SortCol; dir: 1 | -1 } | null;
 
 export function CatalogoClient({ products }: { products: UiProduct[] }) {
   const sp = useSearchParams();
@@ -34,7 +36,14 @@ export function CatalogoClient({ products }: { products: UiProduct[] }) {
   const [stock, setStock] = useState("Todos");
   const [shop, setShop] = useState("Todos");
   const [view, setView] = useState<View>("catalogo");
+  const [sort, setSort] = useState<Sort>(null);
   const [page, setPage] = useState(1);
+
+  // Un click ordena de menor a mayor; el siguiente invierte; el tercero limpia.
+  const toggleSort = (col: SortCol) =>
+    setSort((cur) =>
+      cur?.col !== col ? { col, dir: 1 } : cur.dir === 1 ? { col, dir: -1 } : null,
+    );
 
   const cats = useMemo(
     () => ["Todas", ...Array.from(new Set(products.map((p) => p.cat))).sort()],
@@ -43,23 +52,27 @@ export function CatalogoClient({ products }: { products: UiProduct[] }) {
 
   const filtered = useMemo(() => {
     return products.filter((p) => {
-      const num = p.stockNum;
-      const thr = p.alertThreshold;
       if (q && !`${p.name} ${p.sku}`.toLowerCase().includes(q.toLowerCase())) return false;
       if (cat !== "Todas" && p.cat !== cat) return false;
       if (stock === "Sin stock" && !p.out) return false;
-      if (stock === "Stock bajo" && (p.out || num > thr)) return false;
-      if (stock === "En stock" && (p.out || num <= thr)) return false;
+      if (stock === "Stock" && p.out) return false;
       if (shop !== "Todos" && p.shopify !== shop) return false;
       return true;
     });
   }, [products, q, cat, stock, shop]);
 
-  // En ranking: ordenar por ingreso potencial (stock × precio) desc.
   const displayed = useMemo(() => {
-    if (view !== "ranking") return filtered;
-    return [...filtered].sort((a, b) => b.stockNum * b.priceNum - a.stockNum * a.priceNum);
-  }, [filtered, view]);
+    // Ranking: ordenar por ingreso potencial (stock × precio) desc.
+    if (view === "ranking") {
+      return [...filtered].sort((a, b) => b.stockNum * b.priceNum - a.stockNum * a.priceNum);
+    }
+    // Catálogo: orden opcional por columna (Stock / Precio).
+    if (sort) {
+      const key = sort.col === "stock" ? "stockNum" : "priceNum";
+      return [...filtered].sort((a, b) => (a[key] - b[key]) * sort.dir);
+    }
+    return filtered;
+  }, [filtered, view, sort]);
 
   const totalPages = Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
   const current = Math.min(page, totalPages);
@@ -220,13 +233,14 @@ export function CatalogoClient({ products }: { products: UiProduct[] }) {
           <table className="w-full min-w-[820px] border-t border-line text-left">
             <thead>
               <tr className="mono text-[10px] text-mut">
-                {["Producto", "SKU", "Categoría", "Precio", "Stock", "Shopify", "Campaña Meta", ""].map(
-                  (h, i) => (
-                    <th key={i} className="border-b border-line py-3 font-normal">
-                      {h}
-                    </th>
-                  ),
-                )}
+                <th className="border-b border-line py-3 font-normal">Producto</th>
+                <th className="border-b border-line py-3 font-normal">SKU</th>
+                <th className="border-b border-line py-3 font-normal">Categoría</th>
+                <SortableTh label="Precio" active={sort?.col === "precio"} dir={sort?.dir} onClick={() => toggleSort("precio")} />
+                <SortableTh label="Stock" active={sort?.col === "stock"} dir={sort?.dir} onClick={() => toggleSort("stock")} />
+                <th className="border-b border-line py-3 font-normal">Shopify</th>
+                <th className="border-b border-line py-3 font-normal">Campaña Meta</th>
+                <th className="border-b border-line py-3 font-normal" />
               </tr>
             </thead>
             <tbody>
@@ -288,6 +302,34 @@ export function CatalogoClient({ products }: { products: UiProduct[] }) {
         </div>
       )}
     </>
+  );
+}
+
+function SortableTh({
+  label,
+  active,
+  dir,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  dir?: 1 | -1;
+  onClick: () => void;
+}) {
+  return (
+    <th className="border-b border-line py-3 font-normal">
+      <button
+        onClick={onClick}
+        className={cn(
+          "mono inline-flex items-center gap-1 text-[10px] transition-colors hover:text-ink",
+          active ? "text-ink" : "text-mut",
+        )}
+        title="Ordenar"
+      >
+        {label}
+        <span className="text-[9px]">{active ? (dir === 1 ? "▲" : "▼") : "↕"}</span>
+      </button>
+    </th>
   );
 }
 
