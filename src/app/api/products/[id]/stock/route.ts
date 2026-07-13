@@ -4,6 +4,7 @@ import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { isAuthEnabled } from "@/lib/supabase/config";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { adjustInventory, getProductVariants } from "@/lib/shopify/inventory";
+import { notifyLowStock } from "@/lib/notify";
 
 export async function POST(
   req: NextRequest,
@@ -40,7 +41,7 @@ export async function POST(
   const supaAdmin = createAdminClient();
   const { data: product, error: fetchErr } = await supaAdmin
     .from("products")
-    .select("id, shopify_id")
+    .select("id, shopify_id, name, alert_threshold")
     .eq("id", id)
     .limit(1)
     .maybeSingle();
@@ -59,6 +60,13 @@ export async function POST(
       .from("products")
       .update({ stock: total, updated_at: new Date().toISOString() })
       .eq("id", product.id);
+
+    await notifyLowStock(supaAdmin, {
+      productId: product.id,
+      name: product.name,
+      newStock: total,
+      alertThreshold: product.alert_threshold,
+    });
 
     return NextResponse.json({ ok: true, total, variants: fresh?.variants ?? [] });
   } catch (e) {

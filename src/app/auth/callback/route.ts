@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { hasAccessRestriction, isEmailAllowed } from "@/lib/supabase/config";
 import { normalizeRole, ROLE_HOME } from "@/lib/roles";
 
@@ -16,11 +17,32 @@ export async function GET(request: Request) {
         data: { user },
       } = await supabase.auth.getUser();
 
-      // Enforce acceso: dominios autorizados (NEXT_PUBLIC_ALLOWED_EMAIL_DOMAIN)
-      // o email puntual aprobado (NEXT_PUBLIC_ALLOWED_EMAILS).
+      // Enforce acceso: dominios/emails autorizados (env) o invitación puntual (DB).
       if (hasAccessRestriction()) {
         const email = (user?.email ?? "").toLowerCase();
-        if (!isEmailAllowed(email)) {
+        let allowed = isEmailAllowed(email);
+
+        if (!allowed && email && isAdminConfigured()) {
+          const admin = createAdminClient();
+          const { data: inv } = await admin
+            .from("invitations")
+            .select("role, accepted_at")
+            .eq("email", email)
+            .maybeSingle();
+          if (inv) {
+            allowed = true;
+            // Primera aceptación: aplicar el rol invitado y marcar aceptada.
+            if (user && !inv.accepted_at) {
+              await admin.from("profiles").update({ role: normalizeRole(inv.role) }).eq("id", user.id);
+              await admin
+                .from("invitations")
+                .update({ accepted_at: new Date().toISOString() })
+                .eq("email", email);
+            }
+          }
+        }
+
+        if (!allowed) {
           await supabase.auth.signOut();
           return NextResponse.redirect(`${origin}/login?error=domain`);
         }

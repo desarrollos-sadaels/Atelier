@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import { Popover } from "@/components/Popover";
 import { Search, Bell, Menu } from "@/components/icons";
 import { Dot } from "@/components/ui";
 import { navForRole, ROLE_LABEL, type Role } from "@/lib/roles";
+import { createClient } from "@/lib/supabase/client";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import type { NotificationItem } from "@/lib/queries";
 
 type NavProfile = {
   name: string;
@@ -15,21 +18,81 @@ type NavProfile = {
   role: Role;
 } | null;
 
-const NOTIFS = [
-  { t: "Sin stock", d: "Remera Oversize Negra quedó en 0u — campaña pausada.", time: "5 min", alert: true },
-  { t: "Stock bajo", d: "Buzo Hoodie Gris bajó a 4u (umbral 10).", time: "1 h", alert: false },
-  { t: "Métricas", d: "Sugerencia: pausar Always On · Medias Pack x3.", time: "3 h", alert: false },
-  { t: "Venta", d: "Nuevo pedido #2841 — 3 ítems · $38.700.", time: "hoy", alert: false },
-];
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "ahora";
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} h`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? "ayer" : `${d} d`;
+}
 
-export function TopNav({ profile }: { profile?: NavProfile }) {
+export function TopNav({
+  profile,
+  initialNotifications = [],
+  initialUnread = 0,
+}: {
+  profile?: NavProfile;
+  initialNotifications?: NotificationItem[];
+  initialUnread?: number;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [notifs, setNotifs] = useState<NotificationItem[]>(initialNotifications);
+  const [unread, setUnread] = useState(initialUnread);
 
   const role: Role = profile?.role ?? "admin"; // modo demo (sin auth): nav completa
   const nav = navForRole(role);
+
+  // Realtime: nuevas notificaciones aparecen sin recargar.
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel("notifications-bell")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "notifications" },
+        (payload) => {
+          const n = payload.new as NotificationItem & { created_at: string };
+          setNotifs((cur) =>
+            [
+              {
+                id: n.id,
+                type: n.type,
+                title: n.title,
+                body: n.body,
+                severity: n.severity,
+                read: n.read,
+                createdAt: n.created_at,
+              },
+              ...cur,
+            ].slice(0, 8),
+          );
+          setUnread((c) => c + 1);
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  async function markRead() {
+    if (unread === 0) return;
+    setUnread(0);
+    setNotifs((cur) => cur.map((n) => ({ ...n, read: true })));
+    if (!isSupabaseConfigured()) return;
+    try {
+      await createClient().from("notifications").update({ read: true }).eq("read", false);
+    } catch {
+      /* no-op: el conteo visual ya se actualizó */
+    }
+  }
 
   function submitSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -92,7 +155,11 @@ export function TopNav({ profile }: { profile?: NavProfile }) {
             trigger={
               <>
                 <Bell className="h-4 w-4" />
-                <span className="pulse-dot absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-acc ring-2 ring-bg" />
+                {unread > 0 && (
+                  <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-acc px-1 text-[9px] font-semibold text-white ring-2 ring-bg">
+                    {unread > 9 ? "9+" : unread}
+                  </span>
+                )}
               </>
             }
             panelClass="w-[360px] p-0"
@@ -100,36 +167,51 @@ export function TopNav({ profile }: { profile?: NavProfile }) {
             {(close) => (
               <div>
                 <div className="flex items-center justify-between border-b border-line px-4 py-3">
-                  <span className="mono text-[11px] text-mut">Notificaciones</span>
-                  <button onClick={close} className="mono text-[10px] text-mut hover:text-ink">
+                  <span className="mono text-[11px] text-mut">
+                    Notificaciones{unread > 0 ? ` · ${unread} sin leer` : ""}
+                  </span>
+                  <button
+                    onClick={markRead}
+                    disabled={unread === 0}
+                    className="mono text-[10px] text-mut hover:text-ink disabled:opacity-40"
+                  >
                     Marcar leídas
                   </button>
                 </div>
-                <ul>
-                  {NOTIFS.map((n, i) => (
-                    <li
-                      key={i}
-                      className="flex gap-3 border-b border-line px-4 py-3 last:border-0"
-                    >
-                      <span className="mt-1.5">
-                        <Dot alert={n.alert} />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[12px] font-semibold">{n.t}</span>
-                          <span className="mono text-[10px] text-mut">{n.time}</span>
+                {notifs.length === 0 ? (
+                  <div className="px-4 py-8 text-center">
+                    <p className="mono text-[11px] text-mut">Sin notificaciones todavía</p>
+                  </div>
+                ) : (
+                  <ul>
+                    {notifs.map((n) => (
+                      <li
+                        key={n.id}
+                        className={cn(
+                          "flex gap-3 border-b border-line px-4 py-3 last:border-0",
+                          !n.read && "bg-acc/[0.03]",
+                        )}
+                      >
+                        <span className="mt-1.5">
+                          <Dot alert={n.severity === "alert"} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[12px] font-semibold">{n.title}</span>
+                            <span className="mono text-[10px] text-mut">{timeAgo(n.createdAt)}</span>
+                          </div>
+                          {n.body && <p className="text-[11px] leading-snug text-mut">{n.body}</p>}
                         </div>
-                        <p className="text-[11px] leading-snug text-mut">{n.d}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <Link
-                  href={nav[0]?.href ?? "/catalogo"}
+                  href="/dashboard"
                   onClick={close}
                   className="mono block px-4 py-3 text-center text-[11px] text-acc hover:bg-panel"
                 >
-                  Ver todas las notificaciones
+                  Ver actividad completa
                 </Link>
               </div>
             )}

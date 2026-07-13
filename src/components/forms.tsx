@@ -86,10 +86,14 @@ export function ToggleRow({
   title,
   sub,
   defaultOn,
+  on,
+  onChange,
 }: {
   title: string;
   sub?: string;
   defaultOn?: boolean;
+  on?: boolean;
+  onChange?: (v: boolean) => void;
 }) {
   return (
     <div className="flex items-center justify-between py-3">
@@ -97,7 +101,7 @@ export function ToggleRow({
         <div className="text-[14px] font-medium">{title}</div>
         {sub && <div className="text-[11px] text-mut">{sub}</div>}
       </div>
-      <Toggle defaultOn={defaultOn} />
+      <Toggle defaultOn={defaultOn} on={on} onChange={onChange} />
     </div>
   );
 }

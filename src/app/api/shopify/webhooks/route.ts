@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mapProduct } from "@/lib/shopify/sync";
+import { notifyLowStock } from "@/lib/notify";
 
 export const runtime = "nodejs";
 
@@ -34,16 +35,12 @@ async function handleOrder(order: { line_items?: Array<{ sku?: string; quantity?
       .update({ stock: newStock, updated_at: new Date().toISOString() })
       .eq("id", prod.id);
 
-    if (newStock <= (prod.alert_threshold ?? 0)) {
-      await supa.from("notifications").insert({
-        type: "stock",
-        title: newStock === 0 ? "Sin stock" : "Stock bajo",
-        body: `${prod.name} quedó en ${newStock}u tras una venta.`,
-        product_id: prod.id,
-        severity: newStock === 0 ? "alert" : "warn",
-      });
-      // TODO (Fase 4): email (Resend) + sugerir pausa de campaña Meta vinculada.
-    }
+    await notifyLowStock(supa, {
+      productId: prod.id,
+      name: prod.name,
+      newStock,
+      alertThreshold: prod.alert_threshold ?? 0,
+    });
   }
 }
 

@@ -6,6 +6,7 @@ import type { UiProduct } from "@/lib/ui-types";
 import { normalizeCategory } from "@/lib/categories";
 import { normalizeRole, type Role } from "@/lib/roles";
 import { parsePaymentMethods, DEFAULT_PAYMENT_METHODS, type PaymentMethod } from "@/lib/payments";
+import { parseNotificationSettings, type NotificationSettings } from "@/lib/notifications";
 
 export type { UiProduct };
 
@@ -159,6 +160,61 @@ export async function getPaymentMethods(): Promise<PaymentMethod[]> {
     .eq("key", "payment_methods")
     .maybeSingle();
   return parsePaymentMethods(data?.value);
+}
+
+/** Preferencias de notificación (para el panel de Configuración). */
+export async function getNotificationSettings(): Promise<NotificationSettings> {
+  if (!isSupabaseConfigured()) return parseNotificationSettings(undefined);
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "notification_settings")
+    .maybeSingle();
+  return parseNotificationSettings(data?.value);
+}
+
+// ---------- notificaciones (campanita) ----------
+
+export type NotificationItem = {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  severity: string;
+  read: boolean;
+  createdAt: string;
+};
+
+/** Últimas notificaciones para la campanita. */
+export async function getNotifications(limit = 8): Promise<NotificationItem[]> {
+  if (!isSupabaseConfigured()) return [];
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("notifications")
+    .select("id,type,title,body,severity,read,created_at")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  return (data ?? []).map((n) => ({
+    id: n.id,
+    type: n.type,
+    title: n.title,
+    body: n.body,
+    severity: n.severity,
+    read: n.read,
+    createdAt: n.created_at,
+  }));
+}
+
+/** Cantidad de notificaciones sin leer. */
+export async function getUnreadCount(): Promise<number> {
+  if (!isSupabaseConfigured()) return 0;
+  const supabase = await createClient();
+  const { count } = await supabase
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("read", false);
+  return count ?? 0;
 }
 
 export type ActivityItem = { title: string; body: string | null; severity: string; date: string };

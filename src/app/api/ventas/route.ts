@@ -3,6 +3,7 @@ import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { adjustInventory, getProductVariants } from "@/lib/shopify/inventory";
 import { requireRole } from "@/lib/api-auth";
+import { notifyLowStock } from "@/lib/notify";
 import type { TablesInsert } from "@/lib/supabase/types";
 
 function str(v: unknown): string | null {
@@ -90,7 +91,7 @@ export async function POST(req: NextRequest) {
       // Reflejar el total real en la DB (mismo patrón que el restock).
       const { data: product } = await supaAdmin
         .from("products")
-        .select("id, shopify_id")
+        .select("id, shopify_id, name, alert_threshold")
         .eq("id", productId)
         .maybeSingle();
       if (product?.shopify_id) {
@@ -100,6 +101,12 @@ export async function POST(req: NextRequest) {
             .from("products")
             .update({ stock: fresh.total, updated_at: new Date().toISOString() })
             .eq("id", product.id);
+          await notifyLowStock(supaAdmin, {
+            productId: product.id,
+            name: product.name,
+            newStock: fresh.total,
+            alertThreshold: product.alert_threshold,
+          });
         }
       }
     } catch (e) {

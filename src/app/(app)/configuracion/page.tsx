@@ -12,6 +12,11 @@ import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { ROLE_LABEL, ROLES, normalizeRole, type Role } from "@/lib/roles";
 import { parsePaymentMethods, DEFAULT_PAYMENT_METHODS, type PaymentMethod } from "@/lib/payments";
+import {
+  DEFAULT_NOTIFICATION_SETTINGS,
+  parseNotificationSettings,
+  type NotificationSettings,
+} from "@/lib/notifications";
 import { cn } from "@/lib/cn";
 
 type UserRow = { id: string; name: string; email: string; role: Role };
@@ -41,6 +46,7 @@ export default function ConfiguracionPage() {
   const [tab, setTab] = useState("Usuarios y permisos");
   const [users, setUsers] = useState<UserRow[]>([]);
   const [methods, setMethods] = useState<PaymentMethod[]>(DEFAULT_PAYMENT_METHODS);
+  const [notif, setNotif] = useState<NotificationSettings>(DEFAULT_NOTIFICATION_SETTINGS);
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
@@ -66,6 +72,14 @@ export default function ConfiguracionPage() {
       .maybeSingle()
       .then(({ data }) => {
         if (data?.value) setMethods(parsePaymentMethods(data.value));
+      });
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "notification_settings")
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) setNotif(parseNotificationSettings(data.value));
       });
   }, []);
 
@@ -102,7 +116,7 @@ export default function ConfiguracionPage() {
           {tab === "Ventas" && <PagosSettingsPanel initial={methods} />}
           {tab === "Cuenta" && <CuentaPanel />}
           {tab === "Integraciones" && <IntegracionesPanel />}
-          {tab === "Notificaciones" && <NotificacionesPanel />}
+          {tab === "Notificaciones" && <NotificacionesPanel initial={notif} />}
           {tab === "Facturación" && (
             <Placeholder title="Facturación" text="Plan Pro · próxima factura 01/07/2026 · $—" />
           )}
@@ -116,8 +130,42 @@ export default function ConfiguracionPage() {
 function UsuariosPanel({ users }: { users: UserRow[] }) {
   const [rows, setRows] = useState(users);
   const [busy, setBusy] = useState<string | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState(ROLE_LABEL.vendedor);
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => setRows(users), [users]);
+
+  async function invite() {
+    const email = inviteEmail.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast.error("Email inválido");
+    if (inviting) return;
+    setInviting(true);
+    const t = toast.loading("Creando invitación…");
+    try {
+      const role = ROLE_BY_LABEL[inviteRole] ?? "vendedor";
+      const res = await fetch("/api/users/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, role }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "No se pudo invitar");
+      toast.success(`Invitación lista para ${email}`, {
+        id: t,
+        description: data.emailSkipped
+          ? "Email pendiente (configurá Resend). Pasale el link de la app."
+          : "Se envió un email con instrucciones.",
+      });
+      setInviteEmail("");
+      setInviteOpen(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo invitar", { id: t });
+    } finally {
+      setInviting(false);
+    }
+  }
 
   async function changeRole(user: UserRow, label: string) {
     const role = ROLE_BY_LABEL[label];
@@ -146,15 +194,42 @@ function UsuariosPanel({ users }: { users: UserRow[] }) {
         <span className="mono text-[11px] text-mut">Usuarios y permisos</span>
         <button
           className={btnCls("primary", "h-9 text-[12px]")}
-          onClick={() =>
-            toast("Invitar usuario", {
-              description: "Compartile el link de la app: entra con Google y queda como Vendedor.",
-            })
-          }
+          onClick={() => setInviteOpen((o) => !o)}
         >
           <Plus className="h-4 w-4" /> Invitar usuario
         </button>
       </div>
+      {inviteOpen && (
+        <div className="mx-6 mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-line2 p-4">
+          <div className="min-w-[220px] flex-1">
+            <Field
+              label="EMAIL"
+              placeholder="persona@sadaels.com"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  invite();
+                }
+              }}
+            />
+          </div>
+          <div className="w-[180px]">
+            <span className="mono text-[10px] text-mut">ROL</span>
+            <div className="mt-2">
+              <Dropdown
+                value={inviteRole}
+                options={ROLES.map((r) => ROLE_LABEL[r])}
+                onChange={setInviteRole}
+              />
+            </div>
+          </div>
+          <button className={btnCls("primary", "h-11")} disabled={inviting} onClick={invite}>
+            {inviting ? "Enviando…" : "Enviar invitación"}
+          </button>
+        </div>
+      )}
       <div className="px-6 pb-6">
         {rows.length === 0 ? (
           <p className="mt-6 text-[13px] text-mut">
@@ -413,32 +488,190 @@ function IntegracionesPanel() {
   );
 }
 
-function NotificacionesPanel() {
+function NotificacionesPanel({ initial }: { initial: NotificationSettings }) {
+  const [s, setS] = useState<NotificationSettings>(initial);
+  const [newEmail, setNewEmail] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => setS(initial), [initial]);
+
+  const set = (patch: Partial<NotificationSettings>) => setS((cur) => ({ ...cur, ...patch }));
+
+  function addRecipient() {
+    const e = newEmail.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return toast.error("Email inválido");
+    if (s.recipients.includes(e)) return;
+    set({ recipients: [...s.recipients, e] });
+    setNewEmail("");
+  }
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    const t = toast.loading("Guardando preferencias…");
+    try {
+      const res = await fetch("/api/settings/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: s }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "No se pudo guardar");
+      setS(data.settings);
+      toast.success("Preferencias guardadas", { id: t });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo guardar", { id: t });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <Card>
-      <CardTitle>Preferencias de notificaciones</CardTitle>
-      <div className="divide-y divide-line px-6 pb-4 pt-2">
-        <ToggleRow title="Alertas de stock por email" sub="Cuando un producto baja del umbral" defaultOn />
-        <ToggleRow title="Push de sin stock" sub="Aviso inmediato al quedar en 0u" defaultOn />
-        <ToggleRow title="Resumen diario" sub="Ventas y movimientos del día" />
-        <ToggleRow title="Avisos de Meta Ads" sub="Campañas pausadas o reactivadas" defaultOn />
+      <div className="flex items-center justify-between px-6 pt-6">
+        <span className="mono text-[11px] text-mut">Preferencias de notificaciones</span>
+        <button className={btnCls("primary", "h-9 text-[12px]")} disabled={saving} onClick={save}>
+          {saving ? "Guardando…" : "Guardar"}
+        </button>
+      </div>
+      <div className="divide-y divide-line px-6 pt-2">
+        <ToggleRow
+          title="Alertas de stock por email"
+          sub="Cuando un producto baja del umbral"
+          on={s.stockEmail}
+          onChange={(v) => set({ stockEmail: v })}
+        />
+        <ToggleRow
+          title="Aviso de sin stock"
+          sub="Prioridad alta al quedar en 0u"
+          on={s.pushOutOfStock}
+          onChange={(v) => set({ pushOutOfStock: v })}
+        />
+        <ToggleRow
+          title="Resumen diario"
+          sub="Ventas y stock bajo del día (20:00)"
+          on={s.dailySummary}
+          onChange={(v) => set({ dailySummary: v })}
+        />
+        <ToggleRow
+          title="Avisos de Meta Ads"
+          sub="Campañas pausadas o reactivadas"
+          on={s.metaAlerts}
+          onChange={(v) => set({ metaAlerts: v })}
+        />
+      </div>
+
+      <div className="border-t border-line px-6 pb-6 pt-4">
+        <div className="mono text-[10px] text-mut">DESTINATARIOS</div>
+        <p className="mt-1 text-[11px] text-mut">
+          Mails que reciben las alertas y el resumen. Si está vacío, se envía a los administradores.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {s.recipients.map((e) => (
+            <span
+              key={e}
+              className="mono flex items-center gap-1.5 rounded-full border border-line2 py-1 pl-3 pr-1 text-[11px]"
+            >
+              {e}
+              <button
+                onClick={() => set({ recipients: s.recipients.filter((x) => x !== e) })}
+                className="grid h-4 w-4 place-items-center rounded-full bg-ink text-[8px] text-white"
+                aria-label={`Quitar ${e}`}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="mt-3 flex items-end gap-3">
+          <div className="flex-1">
+            <Field
+              label="AGREGAR MAIL"
+              placeholder="persona@sadaels.com"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addRecipient();
+                }
+              }}
+            />
+          </div>
+          <button className={btnCls("ghost", "h-11")} onClick={addRecipient}>
+            <Plus className="h-4 w-4" /> Agregar
+          </button>
+        </div>
+        <p className="mono mt-4 text-[10px] text-mut">
+          El envío por email requiere configurar Resend (RESEND_API_KEY). Hasta entonces las
+          alertas se ven solo en la campanita.
+        </p>
       </div>
     </Card>
   );
 }
 
 function SeguridadPanel() {
+  const [info, setInfo] = useState<{ email: string; provider: string; lastSignIn: string | null } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => {
+        const u = data.user;
+        if (!u) return;
+        setInfo({
+          email: u.email ?? "—",
+          provider: (u.app_metadata?.provider as string) ?? "—",
+          lastSignIn: u.last_sign_in_at ?? null,
+        });
+      });
+  }, []);
+
+  const cap = (s: string) => (s === "—" ? s : s.charAt(0).toUpperCase() + s.slice(1));
+  const fmt = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" }) : "—";
+
+  const info_rows: [string, string][] = [
+    ["Método de acceso", "Google (SSO)"],
+    ["Email", info?.email ?? "—"],
+    ["Proveedor", cap(info?.provider ?? "—")],
+    ["Último ingreso", fmt(info?.lastSignIn ?? null)],
+  ];
+
   return (
     <Card>
       <CardTitle>Seguridad</CardTitle>
-      <div className="divide-y divide-line px-6 pb-4 pt-2">
-        <ToggleRow title="Verificación en dos pasos" sub="Requerí un segundo factor al iniciar sesión" />
-        <ToggleRow title="Cerrar sesión en inactividad" sub="A los 30 minutos sin actividad" defaultOn />
+      <div className="px-6 pt-4">
+        {info_rows.map(([k, v]) => (
+          <div
+            key={k}
+            className="flex items-center justify-between border-b border-line py-3 last:border-0"
+          >
+            <span className="text-[13px] text-mut">{k}</span>
+            <span className="mono text-[12px]">{v}</span>
+          </div>
+        ))}
       </div>
-      <div className="px-6 pb-6 pt-2">
-        <button className={btnCls("ghost")} onClick={() => toast("Sesiones cerradas en otros dispositivos")}>
-          Cerrar otras sesiones
-        </button>
+      <div className="flex flex-wrap gap-3 px-6 pt-5">
+        <form action="/auth/signout" method="post">
+          <button type="submit" className={btnCls("ghost")}>
+            Cerrar sesión
+          </button>
+        </form>
+        <form action="/api/auth/signout-all" method="post">
+          <button type="submit" className={btnCls("ghost")}>
+            Cerrar todas las sesiones
+          </button>
+        </form>
+      </div>
+      <div className="mt-5 border-t border-line px-6 pb-6 pt-4">
+        <p className="text-[11px] text-mut">
+          La verificación en dos pasos se gestiona desde tu cuenta de Google.
+        </p>
       </div>
     </Card>
   );
