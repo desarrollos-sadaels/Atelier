@@ -319,6 +319,7 @@ export type Database = {
           delivered: boolean
           discount: number
           id: string
+          idempotency_key: string | null
           installments: number | null
           invoice_path: string | null
           invoiced: boolean
@@ -348,6 +349,7 @@ export type Database = {
           delivered?: boolean
           discount?: number
           id?: string
+          idempotency_key?: string | null
           installments?: number | null
           invoice_path?: string | null
           invoiced?: boolean
@@ -377,6 +379,7 @@ export type Database = {
           delivered?: boolean
           discount?: number
           id?: string
+          idempotency_key?: string | null
           installments?: number | null
           invoice_path?: string | null
           invoiced?: boolean
@@ -416,7 +419,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      sales_kpis: {
+        Args: { p_start: string; p_end: string }
+        Returns: {
+          // `numeric` viaja como string en JSON; se coacciona en queries.ts.
+          total_amount: number | string
+          units: number
+          operations: number
+          pending_delivery: number
+          other_brand_units: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

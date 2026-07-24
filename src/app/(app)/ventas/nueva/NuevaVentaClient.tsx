@@ -99,6 +99,9 @@ export function NuevaVentaClient({
   const [delivered, setDelivered] = useState(true);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  // Se genera recién en el primer submit (no en render) para no depender de
+  // `crypto` durante el SSR.
+  const idempotencyKey = useRef<string | null>(null);
 
   const selectedMethod = paymentMethods.find((m) => m.name === pago) ?? null;
   const cuotaOptions = selectedMethod?.installments ?? [];
@@ -182,6 +185,12 @@ export function NuevaVentaClient({
     setSaving(true);
     const t = toast.loading("Registrando venta…");
     try {
+      // Clave de idempotencia: se genera una vez y se reusa en los reintentos
+      // de ESTA venta. Si la request se duplica (doble tap, retry del browser,
+      // respuesta perdida), el server devuelve la venta original en vez de
+      // registrarla de nuevo y descontar stock dos veces.
+      if (!idempotencyKey.current) idempotencyKey.current = crypto.randomUUID();
+
       // Subir la factura adjunta (si se marcó factura y se eligió archivo).
       let invoicePath: string | undefined;
       if (invoiced && invoiceFile) {
@@ -193,6 +202,7 @@ export function NuevaVentaClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          idempotencyKey: idempotencyKey.current,
           soldAt,
           qty: qtyNum,
           price: priceNum,

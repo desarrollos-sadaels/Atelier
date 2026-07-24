@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Chip, Dot, btnCls } from "@/components/ui";
 import { ColorSwatch } from "@/components/ColorSwatch";
@@ -24,30 +24,51 @@ const dateFmt = new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "2-dig
 
 export function VentasClient({
   rows,
+  total,
+  page,
+  pageSize,
+  query,
+  month,
   role,
   monthLabel,
   prevMonth,
   nextMonth,
 }: {
   rows: SaleRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  query: string;
+  month: string;
   role: Role;
   monthLabel: string;
   prevMonth: string;
   nextMonth: string;
 }) {
   const router = useRouter();
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(query);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const filtered = useMemo(() => {
-    if (!q) return rows;
-    const needle = q.toLowerCase();
-    return rows.filter((r) =>
-      `${r.article} ${r.customer_name ?? ""} ${r.seller_name ?? ""} ${r.brand ?? ""}`
-        .toLowerCase()
-        .includes(needle),
-    );
-  }, [rows, q]);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  function hrefFor(opts: { q?: string; page?: number; month?: string }) {
+    const params = new URLSearchParams({ mes: opts.month ?? month });
+    const term = (opts.q ?? query).trim();
+    if (term) params.set("q", term);
+    if (opts.page && opts.page > 1) params.set("p", String(opts.page));
+    return `/ventas?${params.toString()}`;
+  }
+
+  // La búsqueda viaja por la URL para que filtre en la base y no solo sobre la
+  // página cargada. Con debounce, para no pegarle a la DB en cada tecla.
+  useEffect(() => {
+    if (q === query) return;
+    const timer = setTimeout(() => {
+      router.replace(hrefFor({ q, page: 1 }), { scroll: false });
+    }, 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, query, month]);
 
   async function toggle(sale: SaleRow, field: "delivered" | "invoiced") {
     if (busy) return;
@@ -95,14 +116,14 @@ export function VentasClient({
       <div className="mt-8 flex flex-wrap items-center gap-2.5">
         <div className="flex items-center gap-1.5">
           <Link
-            href={`/ventas?mes=${prevMonth}`}
+            href={hrefFor({ month: prevMonth })}
             className="mono grid h-9 w-9 place-items-center rounded-full border border-line2 text-[12px] hover:border-ink/40"
           >
             ‹
           </Link>
           <span className="mono px-2 text-[11px] uppercase tracking-wider text-ink">{monthLabel}</span>
           <Link
-            href={`/ventas?mes=${nextMonth}`}
+            href={hrefFor({ month: nextMonth })}
             className="mono grid h-9 w-9 place-items-center rounded-full border border-line2 text-[12px] hover:border-ink/40"
           >
             ›
@@ -115,19 +136,21 @@ export function VentasClient({
           className="mono h-9 w-64 rounded-full border border-line2 px-3.5 text-[11px] uppercase tracking-wider outline-none placeholder:text-mut focus:border-ink/40"
         />
         <span className="mono ml-auto text-[12px] text-mut">
-          {filtered.length} / {rows.length}
+          {total === 0 ? "0" : `${rows.length} de ${total}`}
         </span>
       </div>
 
-      {filtered.length === 0 ? (
+      {rows.length === 0 ? (
         <div className="mt-10 grid place-items-center rounded-[4px] border border-dashed border-line py-20 text-center">
-          <div className="font-serif text-[22px]">Sin ventas registradas</div>
+          <div className="font-serif text-[22px]">
+            {query ? "Sin resultados" : "Sin ventas registradas"}
+          </div>
           <p className="mono mt-2 text-[12px] text-mut">
-            {rows.length === 0
-              ? "Las ventas que cargues van a aparecer acá y descuentan stock automáticamente."
-              : "Probá con otra búsqueda."}
+            {query
+              ? "Probá con otra búsqueda."
+              : "Las ventas que cargues van a aparecer acá y descuentan stock automáticamente."}
           </p>
-          {role !== "medios" && rows.length === 0 && (
+          {role !== "medios" && !query && (
             <Link href="/ventas/nueva" className={btnCls("primary", "mt-5")}>
               Registrar venta
             </Link>
@@ -148,7 +171,7 @@ export function VentasClient({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => {
+              {rows.map((r) => {
                 const net = saleNet(r);
                 return (
                   <tr key={r.id} className="border-b border-line hover:bg-panel/60">
@@ -248,6 +271,26 @@ export function VentasClient({
               })}
             </tbody>
           </table>
+
+          {totalPages > 1 && (
+            <div className="mt-6 flex items-center justify-between border-t border-line pt-5">
+              <span className="mono text-[11px] text-mut">
+                Página {page} de {totalPages}
+              </span>
+              <div className="flex items-center gap-1.5">
+                {page > 1 && (
+                  <Link href={hrefFor({ page: page - 1 })} className={btnCls("ghost")}>
+                    ‹ Anterior
+                  </Link>
+                )}
+                {page < totalPages && (
+                  <Link href={hrefFor({ page: page + 1 })} className={btnCls("ghost")}>
+                    Siguiente ›
+                  </Link>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </>

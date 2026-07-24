@@ -50,6 +50,7 @@ export async function POST(req: NextRequest) {
   const isOtherBrand = Boolean(body.isOtherBrand);
   const productId = !isOtherBrand ? str(body.productId) : null;
   const inventoryItemId = !isOtherBrand ? str(body.inventoryItemId) : null;
+  const idempotencyKey = str(body.idempotencyKey);
 
   const row: TablesInsert<"sales"> = {
     ...(soldAt ? { sold_at: soldAt } : {}),
@@ -76,18 +77,73 @@ export async function POST(req: NextRequest) {
     invoice_path: Boolean(body.invoiced) ? str(body.invoicePath) : null,
     delivered: Boolean(body.delivered),
     notes: str(body.notes),
+    idempotency_key: idempotencyKey,
     stock_deducted: false,
   };
 
   const supaAdmin = createAdminClient();
 
-  // 1) Descontar stock en Shopify si corresponde (venta de catálogo con variante).
+  /** Reintento de una venta ya registrada: devolvemos la original tal cual. */
+  async function existingSale(key: string) {
+    const { data } = await supaAdmin
+      .from("sales")
+      .select("id, stock_deducted")
+      .eq("idempotency_key", key)
+      .maybeSingle();
+    return data;
+  }
+
+  // 1) Si esta clave ya se usó, es un reintento (doble tap, retry de red).
+  //    Cortamos acá: ni se duplica la venta ni se vuelve a descontar stock.
+  if (idempotencyKey) {
+    const dup = await existingSale(idempotencyKey);
+    if (dup) {
+      return NextResponse.json({
+        ok: true,
+        id: dup.id,
+        stockDeducted: dup.stock_deducted,
+        duplicate: true,
+      });
+    }
+  }
+
+  // 2) Guardar la venta ANTES de tocar Shopify. El orden importa: así el índice
+  //    único arbitra dos requests simultáneas antes de que cualquiera descuente
+  //    stock. Al revés, las dos descontarían y recién después una fallaría.
+  const { data: inserted, error } = await supaAdmin
+    .from("sales")
+    .insert(row)
+    .select("id")
+    .single();
+
+  if (error) {
+    // 23505 = unique_violation: otra request con la misma clave nos ganó de
+    // mano y ya registró la venta.
+    if (error.code === "23505" && idempotencyKey) {
+      const winner = await existingSale(idempotencyKey);
+      if (winner) {
+        return NextResponse.json({
+          ok: true,
+          id: winner.id,
+          stockDeducted: winner.stock_deducted,
+          duplicate: true,
+        });
+      }
+    }
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  }
+
+  const saleId = inserted.id;
+
+  // 3) Descontar stock en Shopify si corresponde (venta de catálogo con variante).
   let stockDeducted = false;
   let warning: string | undefined;
   if (productId && inventoryItemId?.startsWith("gid://") && isShopifyConfigured()) {
     try {
       await adjustInventory([{ inventoryItemId, delta: -qty }]);
       stockDeducted = true;
+      await supaAdmin.from("sales").update({ stock_deducted: true }).eq("id", saleId);
+
       // Reflejar el total real en la DB (mismo patrón que el restock).
       const { data: product } = await supaAdmin
         .from("products")
@@ -110,17 +166,12 @@ export async function POST(req: NextRequest) {
         }
       }
     } catch (e) {
-      // La venta no se pierde: se guarda sin descontar stock y avisamos.
+      // La venta ya quedó guardada: solo avisamos que el stock no se descontó.
       warning = `La venta se registró pero NO se pudo descontar stock en Shopify: ${
         e instanceof Error ? e.message : "error desconocido"
       }`;
     }
   }
-  row.stock_deducted = stockDeducted;
 
-  // 2) Guardar la venta.
-  const { data, error } = await supaAdmin.from("sales").insert(row).select("id").single();
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-
-  return NextResponse.json({ ok: true, id: data.id, stockDeducted, warning });
+  return NextResponse.json({ ok: true, id: saleId, stockDeducted, warning });
 }

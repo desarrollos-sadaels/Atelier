@@ -6,7 +6,6 @@ import type { UiProduct } from "@/lib/ui-types";
 import { normalizeCategory } from "@/lib/categories";
 import { normalizeRole, type Role } from "@/lib/roles";
 import { parsePaymentMethods, DEFAULT_PAYMENT_METHODS, type PaymentMethod } from "@/lib/payments";
-import { saleNet } from "@/lib/sales";
 import { parseNotificationSettings, type NotificationSettings } from "@/lib/notifications";
 
 export type { UiProduct };
@@ -116,36 +115,96 @@ export async function getCurrentProfile(): Promise<CurrentProfile | null> {
 
 export type SaleRow = Tables<"sales">;
 
-/** Ventas de un mes (YYYY-MM), más recientes primero. */
-export async function getSales(month: string): Promise<SaleRow[]> {
-  if (!isSupabaseConfigured()) return [];
-  const supabase = await createClient();
-  const start = `${month}-01`;
+export const SALES_PAGE_SIZE = 50;
+
+export type SalesPage = { rows: SaleRow[]; total: number };
+
+/** Rango [inicio, fin) de un mes YYYY-MM. */
+export function monthRange(month: string): { start: string; end: string } {
   const [y, m] = month.split("-").map(Number);
   const end = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
-  const { data } = await supabase
+  return { start: `${month}-01`, end };
+}
+
+/**
+ * PostgREST parsea el filtro `or=(...)` separando por comas y paréntesis, así
+ * que esos caracteres en el término de búsqueda romperían la query.
+ */
+function sanitizeSearch(q: string): string {
+  return q.trim().replace(/[,()%*\\"']/g, "").slice(0, 60);
+}
+
+/**
+ * Una página de ventas del rango, más recientes primero, con búsqueda opcional
+ * por artículo, cliente o vendedor.
+ *
+ * Antes esto traía TODAS las ventas del mes con `select("*")` y la búsqueda y
+ * la paginación se hacían en el cliente. Con 200 ventas/día eso son ~6.000
+ * filas —incluyendo datos personales de cada cliente— en cada carga de página.
+ */
+export async function getSales(
+  start: string,
+  end: string,
+  opts: { q?: string; page?: number; pageSize?: number } = {},
+): Promise<SalesPage> {
+  if (!isSupabaseConfigured()) return { rows: [], total: 0 };
+  const { q = "", page = 1, pageSize = SALES_PAGE_SIZE } = opts;
+  const supabase = await createClient();
+
+  let query = supabase
     .from("sales")
-    .select("*")
+    .select("*", { count: "exact" })
     .gte("sold_at", start)
-    .lt("sold_at", end)
+    .lt("sold_at", end);
+
+  const term = sanitizeSearch(q);
+  if (term) {
+    query = query.or(
+      `article.ilike.%${term}%,customer_name.ilike.%${term}%,seller_name.ilike.%${term}%`,
+    );
+  }
+
+  const from = Math.max(0, (page - 1) * pageSize);
+  const { data, count } = await query
     .order("sold_at", { ascending: false })
-    .order("created_at", { ascending: false });
-  return data ?? [];
+    .order("created_at", { ascending: false })
+    .range(from, from + pageSize - 1);
+
+  return { rows: data ?? [], total: count ?? 0 };
 }
 
 export type SalesKpis = {
   totalAmount: number;
   units: number;
+  operations: number;
   pendingDelivery: number;
   otherBrandUnits: number;
 };
 
-export function salesKpis(rows: SaleRow[]): SalesKpis {
+const EMPTY_KPIS: SalesKpis = {
+  totalAmount: 0,
+  units: 0,
+  operations: 0,
+  pendingDelivery: 0,
+  otherBrandUnits: 0,
+};
+
+/**
+ * KPIs del rango completo, agregados en Postgres (función `sales_kpis`).
+ * Son cinco números, independientes de la página y de la búsqueda activa.
+ */
+export async function getSalesKpis(start: string, end: string): Promise<SalesKpis> {
+  if (!isSupabaseConfigured()) return EMPTY_KPIS;
+  const supabase = await createClient();
+  const { data } = await supabase.rpc("sales_kpis", { p_start: start, p_end: end });
+  const r = data?.[0];
+  if (!r) return EMPTY_KPIS;
   return {
-    totalAmount: rows.reduce((acc, r) => acc + saleNet(r), 0),
-    units: rows.reduce((acc, r) => acc + r.qty, 0),
-    pendingDelivery: rows.filter((r) => !r.delivered).length,
-    otherBrandUnits: rows.filter((r) => r.is_other_brand).reduce((acc, r) => acc + r.qty, 0),
+    totalAmount: Number(r.total_amount) || 0,
+    units: Number(r.units) || 0,
+    operations: Number(r.operations) || 0,
+    pendingDelivery: Number(r.pending_delivery) || 0,
+    otherBrandUnits: Number(r.other_brand_units) || 0,
   };
 }
 

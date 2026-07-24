@@ -3,7 +3,14 @@ import { PageHeader } from "@/components/PageHeader";
 import { KpiRow } from "@/components/KpiRow";
 import { btnCls } from "@/components/ui";
 import { Plus } from "@/components/icons";
-import { getCurrentProfile, getSales, salesKpis, formatARS } from "@/lib/queries";
+import {
+  getCurrentProfile,
+  getSales,
+  getSalesKpis,
+  monthRange,
+  formatARS,
+  SALES_PAGE_SIZE,
+} from "@/lib/queries";
 import { VentasClient } from "./VentasClient";
 
 function currentMonth(): string {
@@ -22,20 +29,29 @@ const MONTH_LABEL = new Intl.DateTimeFormat("es-AR", { month: "long", year: "num
 export default async function VentasPage({
   searchParams,
 }: {
-  searchParams: Promise<{ mes?: string }>;
+  searchParams: Promise<{ mes?: string; q?: string; p?: string }>;
 }) {
-  const { mes } = await searchParams;
+  const { mes, q, p } = await searchParams;
   const month = /^\d{4}-\d{2}$/.test(mes ?? "") ? (mes as string) : currentMonth();
-  const [profile, rows] = await Promise.all([getCurrentProfile(), getSales(month)]);
+  const search = (q ?? "").slice(0, 60);
+  const page = Math.max(1, Number(p) || 1);
+  const { start, end } = monthRange(month);
+
+  // Los KPIs salen de una agregación en la base sobre el mes completo, así que
+  // no dependen ni de la página ni de la búsqueda activa.
+  const [profile, k, sales] = await Promise.all([
+    getCurrentProfile(),
+    getSalesKpis(start, end),
+    getSales(start, end, { q: search, page }),
+  ]);
   const role = profile?.role ?? "admin";
-  const k = salesKpis(rows);
 
   const [y, m] = month.split("-").map(Number);
   const monthLabel = MONTH_LABEL.format(new Date(y, m - 1, 1));
 
   const kpis = [
     { label: "Ventas del mes", value: formatARS(k.totalAmount), sub: "con descuentos aplicados" },
-    { label: "Unidades", value: String(k.units), sub: `${rows.length} operaciones` },
+    { label: "Unidades", value: String(k.units), sub: `${k.operations} operaciones` },
     {
       label: "Entregas pendientes",
       value: String(k.pendingDelivery),
@@ -69,7 +85,12 @@ export default async function VentasPage({
       </div>
 
       <VentasClient
-        rows={rows}
+        rows={sales.rows}
+        total={sales.total}
+        page={page}
+        pageSize={SALES_PAGE_SIZE}
+        query={search}
+        month={month}
         role={role}
         monthLabel={monthLabel}
         prevMonth={shiftMonth(month, -1)}
