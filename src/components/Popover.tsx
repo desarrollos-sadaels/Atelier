@@ -1,10 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 
 type Coords = { top: number; left?: number; right?: number };
+
+// ¿Estamos en el cliente? El portal necesita `document.body`, que no existe en
+// el SSR. useSyncExternalStore devuelve false en el server y true en el cliente
+// sin un efecto que setee estado (evita el warning de set-state-in-effect).
+const emptySubscribe = () => () => {};
+function useMounted(): boolean {
+  return useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
+}
 
 export function Popover({
   trigger,
@@ -20,13 +32,11 @@ export function Popover({
   panelClass?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useMounted();
   const [coords, setCoords] = useState<Coords>({ top: 0 });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const close = () => setOpen(false);
-
-  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!open) return;

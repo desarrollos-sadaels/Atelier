@@ -135,7 +135,14 @@ function UsuariosPanel({ users }: { users: UserRow[] }) {
   const [inviteRole, setInviteRole] = useState(ROLE_LABEL.vendedor);
   const [inviting, setInviting] = useState(false);
 
-  useEffect(() => setRows(users), [users]);
+  // Resincroniza la tabla cuando el server manda datos frescos (tras
+  // router.refresh()). Ajustar estado durante el render es el patrón que
+  // recomienda React para "resetear al cambiar un prop", sin un efecto.
+  const [prevUsers, setPrevUsers] = useState(users);
+  if (users !== prevUsers) {
+    setPrevUsers(users);
+    setRows(users);
+  }
 
   async function invite() {
     const email = inviteEmail.trim().toLowerCase();
@@ -289,7 +296,12 @@ function PagosSettingsPanel({ initial }: { initial: PaymentMethod[] }) {
   const [newCuotas, setNewCuotas] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => setMethods(initial), [initial]);
+  // Resincroniza con los datos frescos del server tras router.refresh().
+  const [prevInitial, setPrevInitial] = useState(initial);
+  if (initial !== prevInitial) {
+    setPrevInitial(initial);
+    setMethods(initial);
+  }
 
   const update = (i: number, patch: Partial<PaymentMethod>) =>
     setMethods((cur) => cur.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
@@ -493,7 +505,12 @@ function NotificacionesPanel({ initial }: { initial: NotificationSettings }) {
   const [newEmail, setNewEmail] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => setS(initial), [initial]);
+  // Resincroniza con los datos frescos del server tras router.refresh().
+  const [prevInitial, setPrevInitial] = useState(initial);
+  if (initial !== prevInitial) {
+    setPrevInitial(initial);
+    setS(initial);
+  }
 
   const set = (patch: Partial<NotificationSettings>) => setS((cur) => ({ ...cur, ...patch }));
 
