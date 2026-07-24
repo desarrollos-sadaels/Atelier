@@ -2,8 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isAuthEnabled } from "@/lib/supabase/config";
 import { updateSession } from "@/lib/supabase/middleware";
 
-export async function middleware(request: NextRequest) {
-  // Auth not enabled yet (demo nav / DB-only): skip session enforcement.
+// `middleware.ts` quedó deprecado en Next 16.2 y se renombró a `proxy.ts`.
+// Misma firma y mismo `config.matcher`; solo cambia el nombre del export.
+export async function proxy(request: NextRequest) {
+  // Sin auth (demo / solo DB, únicamente en local): no se enforza sesión.
   if (!isAuthEnabled()) return NextResponse.next();
   return updateSession(request);
 }

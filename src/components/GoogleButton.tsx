@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Google } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
-import { isAuthEnabled, ALLOWED_EMAIL_DOMAINS } from "@/lib/supabase/config";
+import { isSupabaseConfigured, ALLOWED_EMAIL_DOMAINS } from "@/lib/supabase/config";
 
 export function GoogleButton() {
   const router = useRouter();
@@ -12,7 +12,12 @@ export function GoogleButton() {
 
   async function signIn() {
     setLoading(true);
-    if (isAuthEnabled()) {
+    // Si hay backend, siempre se loguea de verdad. Antes esto miraba el flag
+    // `NEXT_PUBLIC_AUTH_ENABLED`, que en el bundle del browser puede estar
+    // ausente aunque el server sí esté exigiendo auth: el botón entraba por el
+    // atajo demo y el usuario quedaba sin sesión. El atajo ahora existe solo
+    // cuando no hay Supabase configurado (mock puro, sin backend al que entrar).
+    if (isSupabaseConfigured()) {
       const supabase = createClient();
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",

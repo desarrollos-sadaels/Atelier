@@ -3,14 +3,31 @@ import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { parseNotificationSettings } from "@/lib/notifications";
 import { resolveRecipients } from "@/lib/notify";
 import { isEmailConfigured, sendEmail, emailShell } from "@/lib/email";
+import { saleNet } from "@/lib/sales";
+import { isVercelDeployment } from "@/lib/env";
 
 export const runtime = "nodejs";
 
-/** Autoriza Vercel Cron o una llamada manual con SYNC_SECRET. */
+/**
+ * Autoriza el cron de Vercel o una llamada manual.
+ *
+ * Antes alcanzaba con que la request trajera el header `x-vercel-cron`, que es
+ * un header cualquiera y no una credencial. El patrón documentado por Vercel es
+ * CRON_SECRET: cuando la variable existe en el proyecto, Vercel agrega solo el
+ * header `Authorization: Bearer <CRON_SECRET>` a las llamadas del cron.
+ */
 function authorized(request: Request): boolean {
-  if (request.headers.get("x-vercel-cron")) return true;
-  const secret = process.env.SYNC_SECRET;
-  return Boolean(secret && request.headers.get("authorization") === `Bearer ${secret}`);
+  const auth = request.headers.get("authorization");
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && auth === `Bearer ${cronSecret}`) return true;
+
+  // SYNC_SECRET queda para dispararlo a mano desde una terminal.
+  const syncSecret = process.env.SYNC_SECRET;
+  if (syncSecret && auth === `Bearer ${syncSecret}`) return true;
+
+  // Sin ningún secreto configurado, solo se permite en local.
+  if (!cronSecret && !syncSecret) return !isVercelDeployment();
+  return false;
 }
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
@@ -34,7 +51,7 @@ async function buildAndSend() {
 
   const { data: sales = [] } = await supa.from("sales").select("*").eq("sold_at", day);
   const rows = sales ?? [];
-  const totalAmount = rows.reduce((acc, r) => acc + Number(r.price) * (1 - Number(r.discount)) * r.qty, 0);
+  const totalAmount = rows.reduce((acc, r) => acc + saleNet(r), 0);
   const units = rows.reduce((acc, r) => acc + r.qty, 0);
   const pendingDelivery = rows.filter((r) => !r.delivered).length;
 

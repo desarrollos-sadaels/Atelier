@@ -6,6 +6,7 @@ import type { UiProduct } from "@/lib/ui-types";
 import { normalizeCategory } from "@/lib/categories";
 import { normalizeRole, type Role } from "@/lib/roles";
 import { parsePaymentMethods, DEFAULT_PAYMENT_METHODS, type PaymentMethod } from "@/lib/payments";
+import { saleNet } from "@/lib/sales";
 import { parseNotificationSettings, type NotificationSettings } from "@/lib/notifications";
 
 export type { UiProduct };
@@ -141,7 +142,7 @@ export type SalesKpis = {
 
 export function salesKpis(rows: SaleRow[]): SalesKpis {
   return {
-    totalAmount: rows.reduce((acc, r) => acc + Number(r.price) * (1 - Number(r.discount)), 0),
+    totalAmount: rows.reduce((acc, r) => acc + saleNet(r), 0),
     units: rows.reduce((acc, r) => acc + r.qty, 0),
     pendingDelivery: rows.filter((r) => !r.delivered).length,
     otherBrandUnits: rows.filter((r) => r.is_other_brand).reduce((acc, r) => acc + r.qty, 0),

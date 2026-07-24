@@ -18,15 +18,43 @@ function verifyHmac(raw: string, header: string | null, secret: string): boolean
 
 type Supa = ReturnType<typeof createAdminClient>;
 
-async function handleOrder(order: { line_items?: Array<{ sku?: string; quantity?: number }> }, supa: Supa) {
-  for (const li of order.line_items ?? []) {
-    if (!li.sku) continue;
+type OrderLineItem = { sku?: string; quantity?: number; product_id?: number | string };
+
+const PRODUCT_FIELDS = "id,name,stock,alert_threshold";
+
+/**
+ * Ubica el producto de una línea de la orden.
+ *
+ * Matchea por `shopify_id`, que es el único identificador realmente único: la
+ * migración 0002 le sacó a propósito el constraint de unicidad al SKU porque en
+ * Shopify se repiten entre productos. Buscar por SKU con `.limit(1)` podía
+ * descontarle stock a un producto distinto del que se vendió.
+ */
+async function findProduct(li: OrderLineItem, supa: Supa) {
+  if (li.product_id != null) {
+    const { data } = await supa
+      .from("products")
+      .select(PRODUCT_FIELDS)
+      .eq("shopify_id", String(li.product_id))
+      .maybeSingle();
+    if (data) return data;
+  }
+  // Fallback por SKU, solo si identifica a un único producto: ante ambigüedad
+  // preferimos no tocar nada antes que descontarle al equivocado.
+  if (li.sku) {
     const { data: rows } = await supa
       .from("products")
-      .select("id,name,stock,alert_threshold")
+      .select(PRODUCT_FIELDS)
       .eq("sku", li.sku)
-      .limit(1);
-    const prod = rows?.[0];
+      .limit(2);
+    if (rows?.length === 1) return rows[0];
+  }
+  return null;
+}
+
+async function handleOrder(order: { line_items?: OrderLineItem[] }, supa: Supa) {
+  for (const li of order.line_items ?? []) {
+    const prod = await findProduct(li, supa);
     if (!prod) continue;
 
     const newStock = Math.max(0, (prod.stock ?? 0) - (li.quantity ?? 0));

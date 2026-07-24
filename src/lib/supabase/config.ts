@@ -1,3 +1,5 @@
+import { isVercelDeployment } from "@/lib/env";
+
 export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -45,10 +47,22 @@ export function isSupabaseConfigured(): boolean {
 
 /**
  * Enforcement de auth real (middleware protege rutas, login usa Google).
- * Se activa solo cuando hay Supabase configurado Y el flag está en "true".
- * Permite cablear la DB (Fase 2) sin bloquear la navegación antes de
- * configurar el provider de Google + el dominio permitido.
+ *
+ * En cualquier deploy de Vercel (production o preview) la auth es OBLIGATORIA:
+ * el flag no puede apagarla. Antes, si `NEXT_PUBLIC_AUTH_ENABLED` faltaba o
+ * tenía un typo, el middleware dejaba de proteger las rutas y `requireRole()`
+ * devolvía identidad admin a cualquier request anónima — un error de tipeo en
+ * una env var abría la app entera contra datos reales.
+ *
+ * El flag sigue existiendo solo para desarrollo local, donde permite cablear
+ * la DB sin configurar el provider de Google + el dominio permitido.
+ *
+ * SOLO SERVER: `VERCEL_ENV` no está en el bundle del browser, así que en el
+ * cliente esta función no puede distinguir producción de local. Para decidir
+ * algo en un client component usá `isSupabaseConfigured()`.
  */
 export function isAuthEnabled(): boolean {
-  return isSupabaseConfigured() && process.env.NEXT_PUBLIC_AUTH_ENABLED === "true";
+  if (!isSupabaseConfigured()) return false;
+  if (isVercelDeployment()) return true;
+  return process.env.NEXT_PUBLIC_AUTH_ENABLED === "true";
 }

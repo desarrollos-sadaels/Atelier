@@ -2,14 +2,19 @@ import { NextResponse } from "next/server";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { isAdminConfigured } from "@/lib/supabase/admin";
 import { syncProducts } from "@/lib/shopify/sync";
+import { isVercelDeployment } from "@/lib/env";
 
 function authorized(request: Request): boolean {
   const secret = process.env.SYNC_SECRET;
-  // En dev (sin SYNC_SECRET) se permite libremente; en prod exige el secreto.
-  if (!secret) return true;
-  if (request.headers.get("x-vercel-cron")) return true; // Vercel Cron
-  const auth = request.headers.get("authorization");
-  return auth === `Bearer ${secret}` || request.headers.get("x-sync-secret") === secret;
+  if (secret) {
+    if (request.headers.get("x-vercel-cron")) return true; // Vercel Cron
+    const auth = request.headers.get("authorization");
+    return auth === `Bearer ${secret}` || request.headers.get("x-sync-secret") === secret;
+  }
+  // Sin SYNC_SECRET solo se permite en local. Antes esto devolvía `true` sin
+  // más, así que un deploy al que le faltara la env var dejaba el sync de todo
+  // el catálogo abierto a cualquiera.
+  return !isVercelDeployment();
 }
 
 export async function POST(request: Request) {

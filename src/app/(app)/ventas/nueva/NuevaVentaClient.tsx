@@ -12,6 +12,7 @@ import { ColorSwatch } from "@/components/ColorSwatch";
 import { X } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
 import type { PaymentMethod } from "@/lib/payments";
+import { saleNet } from "@/lib/sales";
 import { cn } from "@/lib/cn";
 
 export type PickerProduct = {
@@ -242,7 +243,13 @@ export function NuevaVentaClient({
     }
   }
 
-  const net = (Number(price) || 0) * (1 - (Number(discount) || 0) / 100) * (Math.trunc(Number(qty)) || 1);
+  // El descuento se edita en % acá y se guarda como fracción; el resto de la
+  // fórmula es la misma que usan la tabla, los KPIs y el resumen diario.
+  const net = saleNet({
+    price: Number(price) || 0,
+    discount: (Number(discount) || 0) / 100,
+    qty: Math.trunc(Number(qty)) || 1,
+  });
 
   return (
     <>

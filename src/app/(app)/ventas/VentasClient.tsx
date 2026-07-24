@@ -8,6 +8,7 @@ import { Chip, Dot, btnCls } from "@/components/ui";
 import { ColorSwatch } from "@/components/ColorSwatch";
 import type { Role } from "@/lib/roles";
 import type { Tables } from "@/lib/supabase/types";
+import { saleNet } from "@/lib/sales";
 import { cn } from "@/lib/cn";
 
 type SaleRow = Tables<"sales">;
@@ -137,7 +138,7 @@ export function VentasClient({
           <table className="w-full min-w-[980px] border-t border-line text-left">
             <thead>
               <tr className="mono text-[10px] text-mut">
-                {["Fecha", "Artículo", "Cliente", "Vendedor", "Punto de venta", "Pago", "Precio", "Estado", ""].map(
+                {["Fecha", "Artículo", "Cliente", "Vendedor", "Punto de venta", "Pago", "Total", "Estado", ""].map(
                   (h, i) => (
                     <th key={i} className="border-b border-line py-3 pr-4 font-normal">
                       {h}
@@ -148,7 +149,7 @@ export function VentasClient({
             </thead>
             <tbody>
               {filtered.map((r) => {
-                const net = Number(r.price) * (1 - Number(r.discount));
+                const net = saleNet(r);
                 return (
                   <tr key={r.id} className="border-b border-line hover:bg-panel/60">
                     <td className="mono py-3 pr-4 text-[12px] text-mut">
