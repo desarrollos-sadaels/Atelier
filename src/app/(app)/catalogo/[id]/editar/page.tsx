@@ -1,6 +1,6 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { EditProductClient, type EditInitial } from "./EditProductClient";
-import { getProductById, formatARS } from "@/lib/queries";
+import { getProductById, getCurrentProfile, formatARS } from "@/lib/queries";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { getProductVariants } from "@/lib/shopify/inventory";
 import { getProductBasics } from "@/lib/shopify/product";
@@ -18,6 +18,10 @@ export default async function EditProductPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const profile = await getCurrentProfile();
+  // Editar catálogo es acción de admin (misma regla que la API de products/[id]).
+  if (profile && profile.role !== "admin") redirect(`/catalogo/${id}`);
+
   const p = await getProductById(id);
   if (!p) notFound();
 

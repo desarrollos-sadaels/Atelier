@@ -32,9 +32,19 @@ function authorized(request: Request): boolean {
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 
-function todayART(): string {
-  // YYYY-MM-DD en horario de Buenos Aires.
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).format(new Date());
+/**
+ * Día del resumen en horario de Buenos Aires.
+ *
+ * El cron corre a las 00:10 ART (03:10 UTC, ver vercel.json): a esa hora ya
+ * empezó el día siguiente en ART, así que el resumen es del día que acaba de
+ * cerrar, no del que recién arrancó. Antes el cron corría a las 23:00 UTC
+ * (20:00 ART) y llamaba a esta función sin el ajuste: el resumen se armaba 4
+ * horas antes de que terminara el día, así que las ventas entre las 20:00 y
+ * la medianoche ART nunca entraban en ningún resumen.
+ */
+function summaryDayART(): string {
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).format(yesterday);
 }
 
 async function buildAndSend() {
@@ -47,7 +57,7 @@ async function buildAndSend() {
     .maybeSingle();
   const settings = parseNotificationSettings(settingRow?.value);
 
-  const day = todayART();
+  const day = summaryDayART();
 
   const { data: sales = [] } = await supa.from("sales").select("*").eq("sold_at", day);
   const rows = sales ?? [];

@@ -31,13 +31,15 @@ export async function POST(req: NextRequest) {
 
   const article = str(body.article);
   const price = Number(body.price);
-  const qty = Math.trunc(Number(body.qty)) || 1;
+  const qty = Math.trunc(Number(body.qty));
   const discount = Number(body.discount) || 0;
   if (!article) return NextResponse.json({ ok: false, error: "Falta el artículo" }, { status: 400 });
   if (!Number.isFinite(price) || price <= 0) {
     return NextResponse.json({ ok: false, error: "Precio inválido" }, { status: 400 });
   }
-  if (qty <= 0) return NextResponse.json({ ok: false, error: "Cantidad inválida" }, { status: 400 });
+  if (!Number.isFinite(qty) || qty <= 0) {
+    return NextResponse.json({ ok: false, error: "Cantidad inválida" }, { status: 400 });
+  }
   if (discount < 0 || discount >= 1) {
     return NextResponse.json({ ok: false, error: "Descuento inválido" }, { status: 400 });
   }
@@ -139,37 +141,49 @@ export async function POST(req: NextRequest) {
   let stockDeducted = false;
   let warning: string | undefined;
   if (productId && inventoryItemId?.startsWith("gid://") && isShopifyConfigured()) {
-    try {
-      await adjustInventory([{ inventoryItemId, delta: -qty }]);
-      stockDeducted = true;
-      await supaAdmin.from("sales").update({ stock_deducted: true }).eq("id", saleId);
+    const { data: product } = await supaAdmin
+      .from("products")
+      .select("id, shopify_id, name, alert_threshold")
+      .eq("id", productId)
+      .maybeSingle();
 
-      // Reflejar el total real en la DB (mismo patrón que el restock).
-      const { data: product } = await supaAdmin
-        .from("products")
-        .select("id, shopify_id, name, alert_threshold")
-        .eq("id", productId)
-        .maybeSingle();
-      if (product?.shopify_id) {
-        const fresh = await getProductVariants(product.shopify_id);
-        if (fresh) {
-          await supaAdmin
-            .from("products")
-            .update({ stock: fresh.total, updated_at: new Date().toISOString() })
-            .eq("id", product.id);
-          await notifyLowStock(supaAdmin, {
-            productId: product.id,
-            name: product.name,
-            newStock: fresh.total,
-            alertThreshold: product.alert_threshold,
-          });
+    if (!product?.shopify_id) {
+      warning = "La venta se registró pero el producto no tiene vínculo con Shopify: no se descontó stock.";
+    } else {
+      try {
+        // El inventoryItemId viene del cliente: verificar que sea una variante
+        // de ESTE producto antes de descontar, para no poder mover el stock de
+        // otro producto mandando un id de otra parte.
+        const known = await getProductVariants(product.shopify_id);
+        const belongsToProduct = known?.variants.some((v) => v.inventoryItemId === inventoryItemId) ?? false;
+        if (!belongsToProduct) {
+          warning = "La venta se registró pero la variante indicada no pertenece a este producto: no se descontó stock.";
+        } else {
+          await adjustInventory([{ inventoryItemId, delta: -qty }]);
+          stockDeducted = true;
+          await supaAdmin.from("sales").update({ stock_deducted: true }).eq("id", saleId);
+
+          // Reflejar el total real en la DB (mismo patrón que el restock).
+          const fresh = await getProductVariants(product.shopify_id);
+          if (fresh) {
+            await supaAdmin
+              .from("products")
+              .update({ stock: fresh.total, updated_at: new Date().toISOString() })
+              .eq("id", product.id);
+            await notifyLowStock(supaAdmin, {
+              productId: product.id,
+              name: product.name,
+              newStock: fresh.total,
+              alertThreshold: product.alert_threshold,
+            });
+          }
         }
+      } catch (e) {
+        // La venta ya quedó guardada: solo avisamos que el stock no se descontó.
+        warning = `La venta se registró pero NO se pudo descontar stock en Shopify: ${
+          e instanceof Error ? e.message : "error desconocido"
+        }`;
       }
-    } catch (e) {
-      // La venta ya quedó guardada: solo avisamos que el stock no se descontó.
-      warning = `La venta se registró pero NO se pudo descontar stock en Shopify: ${
-        e instanceof Error ? e.message : "error desconocido"
-      }`;
     }
   }
 

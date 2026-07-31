@@ -1,9 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
-import { isAuthEnabled } from "@/lib/supabase/config";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { createShopifyProduct } from "@/lib/shopify/create";
+import { requireRole } from "@/lib/api-auth";
 
 const STATUS_MAP: Record<string, "ACTIVE" | "DRAFT" | "ARCHIVED"> = {
   Borrador: "DRAFT",
@@ -18,13 +17,10 @@ function clean(v: unknown): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  // Auth: si está activado, requerir sesión.
-  if (isAuthEnabled()) {
-    const supa = await createClient();
-    const {
-      data: { user },
-    } = await supa.auth.getUser();
-    if (!user) return NextResponse.json({ ok: false, error: "No autenticado" }, { status: 401 });
+  // Crear productos es una acción de catálogo: solo admin.
+  const auth = await requireRole(["admin"]);
+  if ("error" in auth) {
+    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   }
   if (!isShopifyConfigured()) {
     return NextResponse.json({ ok: false, error: "Shopify no está configurado" }, { status: 400 });
@@ -98,10 +94,10 @@ export async function POST(req: NextRequest) {
     });
 
     const shopifyNumericId = product.id.split("/").pop()!;
-    const totalStock =
-      options.length && variants.length
-        ? variants.reduce((s, v) => s + (Number(v.qty) || 0), 0)
-        : singleStock;
+    const useVariants = options.length > 0 && variants.length > 0;
+    const totalStock = useVariants
+      ? variants.reduce((s, v) => s + (Number(v.qty) || 0), 0)
+      : singleStock;
     const first = product.variants?.nodes?.[0];
 
     const supaAdmin = createAdminClient();
@@ -116,7 +112,11 @@ export async function POST(req: NextRequest) {
           cost: cost != null && Number.isFinite(cost) ? cost : null,
           stock: totalStock,
           sku: first?.sku || skuBase || null,
-          barcode: first?.barcode || barcode || null,
+          // createShopifyProduct no manda barcode cuando hay variantes por
+          // color/talle (un solo código no distingue variantes distintas):
+          // no guardar acá el valor tipeado por el usuario si Shopify no lo
+          // tiene, para que la DB no diga algo que Shopify desmiente.
+          barcode: useVariants ? first?.barcode || null : first?.barcode || barcode || null,
           provider: vendor,
           shopify_status: (product.status || status).toLowerCase(),
           alert_threshold: alertThreshold,

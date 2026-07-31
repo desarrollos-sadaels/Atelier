@@ -29,7 +29,13 @@ type View = "catalogo" | "ranking";
 type SortCol = "stock" | "precio";
 type Sort = { col: SortCol; dir: 1 | -1 } | null;
 
-export function CatalogoClient({ products }: { products: UiProduct[] }) {
+export function CatalogoClient({
+  products,
+  canManage,
+}: {
+  products: UiProduct[];
+  canManage: boolean;
+}) {
   const sp = useSearchParams();
   const [q, setQ] = useState(sp.get("q") ?? "");
   const [cat, setCat] = useState("Todas");
@@ -102,9 +108,11 @@ export function CatalogoClient({ products }: { products: UiProduct[] }) {
             >
               <Download className="h-4 w-4" /> Exportar
             </button>
-            <Link href="/catalogo/nuevo" className={btnCls("primary")}>
-              <Plus className="h-4 w-4" /> Nuevo producto
-            </Link>
+            {canManage && (
+              <Link href="/catalogo/nuevo" className={btnCls("primary")}>
+                <Plus className="h-4 w-4" /> Nuevo producto
+              </Link>
+            )}
           </>
         }
       />

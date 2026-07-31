@@ -49,7 +49,9 @@ export async function POST(request: Request) {
   return NextResponse.json({ address, results });
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!authorized(request))
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   if (!isShopifyConfigured())
     return NextResponse.json({ error: "Shopify no configurado" }, { status: 400 });
   const data = await shopifyAdmin<{

@@ -18,6 +18,7 @@ export function StockPanel({
   hasSize,
   alertThreshold,
   fallbackTotal,
+  readOnly,
 }: {
   productId: string;
   initialVariants: VariantStock[] | null;
@@ -25,6 +26,7 @@ export function StockPanel({
   hasSize: boolean;
   alertThreshold: number;
   fallbackTotal: number;
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [variants, setVariants] = useState<VariantStock[] | null>(initialVariants);
@@ -49,7 +51,12 @@ export function StockPanel({
     if (!variants || !hasSize) return [];
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const v of variants) if (v.size && !seen.has(v.size)) (seen.add(v.size), out.push(v.size));
+    for (const v of variants) {
+      if (v.size && !seen.has(v.size)) {
+        seen.add(v.size);
+        out.push(v.size);
+      }
+    }
     return out;
   }, [variants, hasSize]);
 
@@ -127,6 +134,8 @@ export function StockPanel({
 
         {variants === null ? (
           <p className="mt-5 text-[12px] text-mut">No se pudo leer el inventario desde Shopify.</p>
+        ) : readOnly ? (
+          <p className="mono mt-5 text-[11px] text-mut">Solo un admin puede reponer stock.</p>
         ) : (
           <>
             <div className="hair mt-5" />

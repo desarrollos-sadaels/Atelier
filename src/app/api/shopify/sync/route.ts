@@ -7,7 +7,6 @@ import { isVercelDeployment } from "@/lib/env";
 function authorized(request: Request): boolean {
   const secret = process.env.SYNC_SECRET;
   if (secret) {
-    if (request.headers.get("x-vercel-cron")) return true; // Vercel Cron
     const auth = request.headers.get("authorization");
     return auth === `Bearer ${secret}` || request.headers.get("x-sync-secret") === secret;
   }

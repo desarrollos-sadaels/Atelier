@@ -39,6 +39,7 @@ export async function GET(
         id: v.id,
         color: v.color,
         size: v.size,
+        optionLabel: v.optionLabel,
         available: v.available,
         inventoryItemId: v.inventoryItemId,
       })),

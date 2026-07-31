@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mapProduct } from "@/lib/shopify/sync";
+import { getProductIdByInventoryItem, getProductVariants } from "@/lib/shopify/inventory";
 import { notifyLowStock } from "@/lib/notify";
 
 export const runtime = "nodejs";
@@ -20,7 +21,7 @@ type Supa = ReturnType<typeof createAdminClient>;
 
 type OrderLineItem = { sku?: string; quantity?: number; product_id?: number | string };
 
-const PRODUCT_FIELDS = "id,name,stock,alert_threshold";
+const PRODUCT_FIELDS = "id,shopify_id,name,alert_threshold";
 
 /**
  * Ubica el producto de una línea de la orden.
@@ -52,24 +53,58 @@ async function findProduct(li: OrderLineItem, supa: Supa) {
   return null;
 }
 
+/**
+ * Releer el stock real de un producto desde Shopify (fuente de verdad) y
+ * reflejarlo en la DB. Usado por cualquier webhook que toque inventario: evita
+ * el problema de descontar sobre un número cacheado, que se pisa si llegan dos
+ * eventos concurrentes para el mismo producto.
+ */
+async function reconcileStock(
+  supa: Supa,
+  prod: { id: string; shopify_id: string | null; name: string; alert_threshold: number | null },
+) {
+  if (!prod.shopify_id) return;
+  const fresh = await getProductVariants(prod.shopify_id);
+  if (!fresh) return;
+  await supa
+    .from("products")
+    .update({ stock: fresh.total, updated_at: new Date().toISOString() })
+    .eq("id", prod.id);
+
+  await notifyLowStock(supa, {
+    productId: prod.id,
+    name: prod.name,
+    newStock: fresh.total,
+    alertThreshold: prod.alert_threshold ?? 0,
+  });
+}
+
 async function handleOrder(order: { line_items?: OrderLineItem[] }, supa: Supa) {
+  const seen = new Set<string>();
   for (const li of order.line_items ?? []) {
     const prod = await findProduct(li, supa);
-    if (!prod) continue;
-
-    const newStock = Math.max(0, (prod.stock ?? 0) - (li.quantity ?? 0));
-    await supa
-      .from("products")
-      .update({ stock: newStock, updated_at: new Date().toISOString() })
-      .eq("id", prod.id);
-
-    await notifyLowStock(supa, {
-      productId: prod.id,
-      name: prod.name,
-      newStock,
-      alertThreshold: prod.alert_threshold ?? 0,
-    });
+    if (!prod || seen.has(prod.id)) continue;
+    seen.add(prod.id);
+    await reconcileStock(supa, prod);
   }
+}
+
+async function handleInventoryLevel(
+  payload: { inventory_item_id?: number | string },
+  supa: Supa,
+) {
+  if (payload.inventory_item_id == null) return;
+  const shopifyId = await getProductIdByInventoryItem(
+    `gid://shopify/InventoryItem/${payload.inventory_item_id}`,
+  );
+  if (!shopifyId) return;
+  const { data: prod } = await supa
+    .from("products")
+    .select(PRODUCT_FIELDS)
+    .eq("shopify_id", shopifyId)
+    .maybeSingle();
+  if (!prod) return;
+  await reconcileStock(supa, prod);
 }
 
 export async function POST(request: Request) {
@@ -93,9 +128,9 @@ export async function POST(request: Request) {
       await supa.from("products").upsert(mapProduct(payload), { onConflict: "shopify_id" });
     } else if (topic === "orders/create") {
       await handleOrder(payload, supa);
+    } else if (topic === "inventory_levels/update") {
+      await handleInventoryLevel(payload, supa);
     }
-    // inventory_levels/update: requiere mapear inventory_item_id → producto;
-    // por ahora se reconcilia con el sync periódico (Vercel Cron, Fase 4).
     return NextResponse.json({ ok: true, topic });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

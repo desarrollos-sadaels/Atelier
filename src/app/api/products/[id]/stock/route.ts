@@ -1,10 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
-import { isAuthEnabled } from "@/lib/supabase/config";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { adjustInventory, getProductVariants } from "@/lib/shopify/inventory";
 import { notifyLowStock } from "@/lib/notify";
+import { requireRole } from "@/lib/api-auth";
 
 export async function POST(
   req: NextRequest,
@@ -12,12 +11,10 @@ export async function POST(
 ) {
   const { id } = await params;
 
-  if (isAuthEnabled()) {
-    const supa = await createClient();
-    const {
-      data: { user },
-    } = await supa.auth.getUser();
-    if (!user) return NextResponse.json({ ok: false, error: "No autenticado" }, { status: 401 });
+  // Ajustar inventario manualmente (fuera del flujo de venta) es acción de admin.
+  const auth = await requireRole(["admin"]);
+  if ("error" in auth) {
+    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   }
   if (!isShopifyConfigured() || !isAdminConfigured()) {
     return NextResponse.json({ ok: false, error: "Shopify/Supabase no configurado" }, { status: 400 });
@@ -49,6 +46,21 @@ export async function POST(
   if (fetchErr) return NextResponse.json({ ok: false, error: fetchErr.message }, { status: 500 });
   if (!product?.shopify_id) {
     return NextResponse.json({ ok: false, error: "Producto sin vínculo a Shopify" }, { status: 400 });
+  }
+
+  // Los inventoryItemId vienen del cliente: verificar que sean variantes de
+  // ESTE producto antes de tocar Shopify, para que una request armada a mano
+  // no pueda mover stock de otro producto vía su propia URL.
+  const known = await getProductVariants(product.shopify_id);
+  if (!known) {
+    return NextResponse.json({ ok: false, error: "No se pudo leer el inventario desde Shopify" }, { status: 502 });
+  }
+  const validIds = new Set(known.variants.map((v) => v.inventoryItemId));
+  if (changes.some((c) => !validIds.has(c.inventoryItemId))) {
+    return NextResponse.json(
+      { ok: false, error: "Una de las variantes no pertenece a este producto" },
+      { status: 400 },
+    );
   }
 
   try {

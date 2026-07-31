@@ -26,7 +26,8 @@ const SHOPIFY_LABEL: Record<string, string> = {
   archived: "Archivado",
 };
 
-function toUi(p: Tables<"products">): UiProduct {
+function toUi(p: Tables<"products">, linkedProductIds?: Set<string>): UiProduct {
+  const linked = linkedProductIds?.has(p.id) ?? false;
   return {
     id: p.id,
     name: p.name,
@@ -37,8 +38,8 @@ function toUi(p: Tables<"products">): UiProduct {
     stock: `${p.stock}u`,
     out: p.stock === 0,
     shopify: p.stock === 0 ? "Sin stock" : (SHOPIFY_LABEL[p.shopify_status ?? "active"] ?? "Activo"),
-    meta: "—",
-    metaState: "n",
+    meta: linked ? "Vinculado" : "—",
+    metaState: linked ? "a" : "n",
     image: p.image_url ?? null,
     stockNum: p.stock,
     alertThreshold: p.alert_threshold,
@@ -48,8 +49,12 @@ function toUi(p: Tables<"products">): UiProduct {
 export async function getProducts(): Promise<UiProduct[]> {
   if (!isSupabaseConfigured()) return [];
   const supabase = await createClient();
-  const { data } = await supabase.from("products").select("*").order("name", { ascending: true });
-  return (data ?? []).map(toUi);
+  const [{ data }, { data: links }] = await Promise.all([
+    supabase.from("products").select("*").order("name", { ascending: true }),
+    supabase.from("product_campaign_links").select("product_id"),
+  ]);
+  const linkedProductIds = new Set((links ?? []).map((l) => l.product_id));
+  return (data ?? []).map((p) => toUi(p, linkedProductIds));
 }
 
 export async function getProductById(id: string): Promise<Tables<"products"> | null> {
@@ -57,6 +62,36 @@ export async function getProductById(id: string): Promise<Tables<"products"> | n
   const supabase = await createClient();
   const { data } = await supabase.from("products").select("*").eq("id", id).limit(1);
   return data?.[0] ?? null;
+}
+
+export type ProductCampaignLink = {
+  linkId: string;
+  metaCampaignId: string | null;
+  name: string;
+  status: string | null;
+};
+
+/** Campaña de Meta vinculada a este producto (a lo sumo una), si existe. */
+export async function getProductCampaignLink(productId: string): Promise<ProductCampaignLink | null> {
+  if (!isSupabaseConfigured()) return null;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("product_campaign_links")
+    .select("id, campaigns(meta_campaign_id, name, status)")
+    .eq("product_id", productId)
+    .limit(1)
+    .maybeSingle();
+  const campaign = data?.campaigns as
+    | { meta_campaign_id: string | null; name: string; status: string | null }
+    | null
+    | undefined;
+  if (!data || !campaign) return null;
+  return {
+    linkId: data.id,
+    metaCampaignId: campaign.meta_campaign_id,
+    name: campaign.name,
+    status: campaign.status,
+  };
 }
 
 export type DashboardStats = {
@@ -206,6 +241,26 @@ export async function getSalesKpis(start: string, end: string): Promise<SalesKpi
     pendingDelivery: Number(r.pending_delivery) || 0,
     otherBrandUnits: Number(r.other_brand_units) || 0,
   };
+}
+
+/** Rango [hoy, mañana) en horario de Buenos Aires. */
+function todayRangeART(): { start: string; end: string } {
+  const start = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+  }).format(new Date());
+  const [y, m, d] = start.split("-").map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  const end = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    next.getUTCDate(),
+  ).padStart(2, "0")}`;
+  return { start, end };
+}
+
+/** Monto total vendido "hoy" (Buenos Aires) — para el KPI del dashboard. */
+export async function getTodaySales(): Promise<{ totalAmount: number; operations: number }> {
+  const { start, end } = todayRangeART();
+  const { totalAmount, operations } = await getSalesKpis(start, end);
+  return { totalAmount, operations };
 }
 
 // ---------- settings ----------

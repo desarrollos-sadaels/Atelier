@@ -1,12 +1,13 @@
 import { Suspense } from "react";
-import { getProducts } from "@/lib/queries";
+import { getProducts, getCurrentProfile } from "@/lib/queries";
 import { CatalogoClient } from "./CatalogoClient";
 
 export default async function CatalogoPage() {
-  const products = await getProducts();
+  const [products, profile] = await Promise.all([getProducts(), getCurrentProfile()]);
+  const canManage = !profile || profile.role === "admin";
   return (
     <Suspense fallback={<div className="pt-9" />}>
-      <CatalogoClient products={products} />
+      <CatalogoClient products={products} canManage={canManage} />
     </Suspense>
   );
 }

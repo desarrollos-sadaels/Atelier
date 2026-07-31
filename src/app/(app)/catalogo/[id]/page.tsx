@@ -4,9 +4,13 @@ import { Card, CardTitle, btnCls } from "@/components/ui";
 import { ChevronLeft } from "@/components/icons";
 import { ProductShowcase } from "./ProductShowcase";
 import { StockPanel } from "./StockPanel";
-import { getProductById, formatARS } from "@/lib/queries";
+import { CampaignLinkCard } from "./CampaignLinkCard";
+import { getProductById, getCurrentProfile, getProductCampaignLink, formatARS } from "@/lib/queries";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { getProductVariants, type ProductVariants } from "@/lib/shopify/inventory";
+import { isMetaConfigured } from "@/lib/meta/client";
+import { getAllMetaCampaigns } from "@/lib/meta/campaigns";
+import { getCampaignDemographics } from "@/lib/meta/insights";
 
 export default async function ProductDetailPage({
   params,
@@ -14,8 +18,21 @@ export default async function ProductDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const p = await getProductById(id);
+  const [p, profile, campaignLink] = await Promise.all([
+    getProductById(id),
+    getCurrentProfile(),
+    getProductCampaignLink(id),
+  ]);
   if (!p) notFound();
+  const canManage = !profile || profile.role === "admin";
+
+  const metaConfigured = isMetaConfigured();
+  const [availableCampaigns, demo] = await Promise.all([
+    metaConfigured && canManage && !campaignLink ? getAllMetaCampaigns() : Promise.resolve([]),
+    metaConfigured && campaignLink?.metaCampaignId
+      ? getCampaignDemographics(campaignLink.metaCampaignId).catch(() => null)
+      : Promise.resolve(null),
+  ]);
 
   // Stock por variante en vivo desde Shopify (fuente de verdad del inventario).
   let pv: ProductVariants | null = null;
@@ -56,9 +73,11 @@ export default async function ProductDetailPage({
           <Link href="/catalogo" className={btnCls("ghost")}>
             <ChevronLeft className="h-4 w-4" /> Volver
           </Link>
-          <Link href={`/catalogo/${p.id}/editar`} className={btnCls("primary")}>
-            Editar producto
-          </Link>
+          {canManage && (
+            <Link href={`/catalogo/${p.id}/editar`} className={btnCls("primary")}>
+              Editar producto
+            </Link>
+          )}
         </div>
       </div>
 
@@ -69,6 +88,7 @@ export default async function ProductDetailPage({
           hasColor={hasColor}
           hasSize={hasSize}
           shopifyStatus={p.shopify_status ?? "—"}
+          metaLabel={!metaConfigured ? "no conectado" : campaignLink ? campaignLink.name : "sin vincular"}
           specs={specs}
         />
       </div>
@@ -81,6 +101,7 @@ export default async function ProductDetailPage({
           hasSize={hasSize}
           alertThreshold={p.alert_threshold}
           fallbackTotal={p.stock}
+          readOnly={!canManage}
         />
 
         <Card>
@@ -101,17 +122,14 @@ export default async function ProductDetailPage({
           </div>
         </Card>
 
-        <Card>
-          <CardTitle>Campaña Meta vinculada</CardTitle>
-          <div className="px-6 pb-6 pt-4">
-            <div className="text-[15px] font-medium">Sin campaña vinculada</div>
-            <p className="mono mt-3 text-[11px] leading-relaxed text-mut">
-              Vinculá este producto con una campaña de Meta Ads para pausar/avisar
-              automáticamente al quedar sin stock.
-            </p>
-            <button className={btnCls("ghost", "mt-5 h-10 text-[12px]")}>Vincular campaña</button>
-          </div>
-        </Card>
+        <CampaignLinkCard
+          productId={p.id}
+          readOnly={!canManage}
+          metaConfigured={metaConfigured}
+          link={campaignLink ? { name: campaignLink.name, status: campaignLink.status } : null}
+          campaigns={availableCampaigns}
+          demo={demo}
+        />
       </div>
     </>
   );

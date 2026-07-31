@@ -1,9 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
-import { isAuthEnabled } from "@/lib/supabase/config";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { updateShopifyProduct } from "@/lib/shopify/product";
+import { requireRole } from "@/lib/api-auth";
 
 const STATUS_MAP: Record<string, "ACTIVE" | "DRAFT" | "ARCHIVED"> = {
   Borrador: "DRAFT",
@@ -20,12 +19,10 @@ function clean(v: unknown): string | null {
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  if (isAuthEnabled()) {
-    const supa = await createClient();
-    const {
-      data: { user },
-    } = await supa.auth.getUser();
-    if (!user) return NextResponse.json({ ok: false, error: "No autenticado" }, { status: 401 });
+  // Editar catálogo es acción de admin.
+  const auth = await requireRole(["admin"]);
+  if ("error" in auth) {
+    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   }
   if (!isShopifyConfigured() || !isAdminConfigured()) {
     return NextResponse.json({ ok: false, error: "Shopify/Supabase no configurado" }, { status: 400 });

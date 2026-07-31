@@ -12,6 +12,7 @@ export function ProductShowcase({
   hasColor,
   hasSize,
   shopifyStatus,
+  metaLabel,
   specs,
 }: {
   productImages: string[];
@@ -19,6 +20,7 @@ export function ProductShowcase({
   hasColor: boolean;
   hasSize: boolean;
   shopifyStatus: string;
+  metaLabel: string;
   specs: [string, string][];
 }) {
   // Colores únicos (orden de aparición) con imagen representativa y stock total.
@@ -103,7 +105,7 @@ export function ProductShowcase({
             ● {selectedAvail === 0 ? "Sin stock" : "En stock"}
           </span>
           <span className="text-mut">○ Shopify: {shopifyStatus}</span>
-          <span className="text-mut">○ Meta: sin vincular</span>
+          <span className="text-mut">○ Meta: {metaLabel}</span>
         </div>
 
         {colors.length > 0 && (

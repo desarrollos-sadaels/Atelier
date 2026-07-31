@@ -23,6 +23,16 @@ export async function resolveRecipients(supa: Supa, explicit: string[]): Promise
     .filter((e): e is string => Boolean(e && e.includes("@")));
 }
 
+/** Destinatarios para avisos de Meta: los configurados, o el equipo de medios (admins si no hay). */
+async function resolveMediaRecipients(supa: Supa, explicit: string[]): Promise<string[]> {
+  if (explicit.length) return explicit;
+  const { data } = await supa.from("profiles").select("email").eq("role", "medios");
+  const emails = (data ?? [])
+    .map((r) => r.email)
+    .filter((e): e is string => Boolean(e && e.includes("@")));
+  return emails.length ? emails : resolveRecipients(supa, []);
+}
+
 export type LowStockInput = {
   productId: string;
   name: string;
@@ -54,11 +64,62 @@ export async function notifyLowStock(supa: Supa, input: LowStockInput): Promise<
   });
 
   // Email (gated por Resend + preferencia).
+  let settings: NotificationSettings | null = null;
   try {
-    const settings = await loadSettings(supa);
+    settings = await loadSettings(supa);
     const wantsEmail = out ? settings.pushOutOfStock || settings.stockEmail : settings.stockEmail;
-    if (!wantsEmail || !isEmailConfigured()) return;
-    const recipients = await resolveRecipients(supa, settings.recipients);
+    if (wantsEmail && isEmailConfigured()) {
+      const recipients = await resolveRecipients(supa, settings.recipients);
+      if (recipients.length) {
+        await sendEmail({
+          to: recipients,
+          subject: `Atelier · ${title}: ${name}`,
+          html: emailShell(title, `<p style="font-size:14px;line-height:1.5">${body}</p>`),
+        });
+      }
+    }
+  } catch (e) {
+    // El email no debe romper el flujo de stock.
+    console.error("[notify] email fallo:", e);
+  }
+
+  if (out) await notifyCampaignOutOfStock(supa, { productId, name, settings });
+}
+
+/**
+ * Si el producto que se quedó sin stock está vinculado a una campaña de Meta,
+ * avisa al equipo de medios (campanita + email). Nunca pausa la campaña — solo
+ * notifica, la acción la toma una persona.
+ */
+async function notifyCampaignOutOfStock(
+  supa: Supa,
+  input: { productId: string; name: string; settings: NotificationSettings | null },
+): Promise<void> {
+  const { productId, name, settings } = input;
+  const { data: link } = await supa
+    .from("product_campaign_links")
+    .select("campaigns(name)")
+    .eq("product_id", productId)
+    .limit(1)
+    .maybeSingle();
+  const campaign = link?.campaigns as { name: string } | null | undefined;
+  if (!campaign) return;
+
+  const title = "Campaña activa sin stock";
+  const body = `${name} se quedó sin stock y está vinculado a la campaña "${campaign.name}". Pausala manualmente si corresponde.`;
+
+  await supa.from("notifications").insert({
+    type: "meta_stock",
+    title,
+    body,
+    product_id: productId,
+    severity: "alert",
+  });
+
+  try {
+    const s = settings ?? (await loadSettings(supa));
+    if (!s.metaAlerts || !isEmailConfigured()) return;
+    const recipients = await resolveMediaRecipients(supa, s.recipients);
     if (!recipients.length) return;
     await sendEmail({
       to: recipients,
@@ -66,7 +127,6 @@ export async function notifyLowStock(supa: Supa, input: LowStockInput): Promise<
       html: emailShell(title, `<p style="font-size:14px;line-height:1.5">${body}</p>`),
     });
   } catch (e) {
-    // El email no debe romper el flujo de stock.
-    console.error("[notify] email fallo:", e);
+    console.error("[notify] email meta fallo:", e);
   }
 }

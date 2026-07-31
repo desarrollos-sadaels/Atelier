@@ -2,26 +2,43 @@ import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Chip, Dot, Eyebrow, btnCls } from "@/components/ui";
 import { Plus } from "@/components/icons";
-import { getDashboardStats, getRecentActivity } from "@/lib/queries";
+import { getDashboardStats, getRecentActivity, getTodaySales, getCurrentProfile, formatARS } from "@/lib/queries";
 import { cn } from "@/lib/cn";
 
 export default async function DashboardPage() {
-  const stats = await getDashboardStats();
-  const activity = await getRecentActivity();
+  const [stats, activity, todaySales, profile] = await Promise.all([
+    getDashboardStats(),
+    getRecentActivity(),
+    getTodaySales(),
+    getCurrentProfile(),
+  ]);
+  const firstName = (profile?.name ?? "Luz").split(" ")[0];
+  const todayKicker = new Intl.DateTimeFormat("es-AR", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "America/Argentina/Buenos_Aires",
+  }).format(new Date());
   const kpis = [
     { label: "Productos", value: stats.total.toLocaleString("es-AR"), sub: "sincronizados con Shopify", alert: false },
     { label: "Stock bajo", value: String(stats.lowStock), sub: "en o bajo el umbral", alert: false },
     { label: "Sin stock", value: String(stats.outStock), sub: "requieren reposición", alert: stats.outStock > 0 },
-    { label: "Ventas hoy", value: "—", sub: "pendiente de webhooks", alert: false },
+    {
+      label: "Ventas hoy",
+      value: todaySales.operations > 0 ? formatARS(todaySales.totalAmount) : "—",
+      sub: todaySales.operations > 0 ? `${todaySales.operations} operaciones` : "sin ventas todavía",
+      alert: false,
+    },
   ];
   const alerts = stats.alerts;
   return (
     <>
       <PageHeader
-        kicker="Miércoles 25 jun 2026 · Buenos Aires"
+        kicker={`${todayKicker} · Buenos Aires`}
         title={
           <>
-            Buenos días, <span className="italic">Luz</span>
+            Buenos días, <span className="italic">{firstName}</span>
           </>
         }
         actions={

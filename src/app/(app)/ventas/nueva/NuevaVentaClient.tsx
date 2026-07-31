@@ -28,6 +28,7 @@ type Variant = {
   id: string;
   color: string | null;
   size: string | null;
+  optionLabel: string;
   available: number;
   inventoryItemId: string;
 };
@@ -76,6 +77,7 @@ export function NuevaVentaClient({
   const [loadingVariants, setLoadingVariants] = useState(false);
   const [color, setColor] = useState<string | null>(null);
   const [talle, setTalle] = useState<string | null>(null);
+  const [genericLabel, setGenericLabel] = useState<string | null>(null);
   // otra marca
   const [brand, setBrand] = useState("");
   const [freeArticle, setFreeArticle] = useState("");
@@ -102,6 +104,11 @@ export function NuevaVentaClient({
   // Se genera recién en el primer submit (no en render) para no depender de
   // `crypto` durante el SSR.
   const idempotencyKey = useRef<string | null>(null);
+  // Firma de los datos del último intento: si el usuario corrige algo antes de
+  // reintentar, la clave vieja ya no debe reusarse (si no, el server devolvería
+  // la venta original con los datos viejos como si el reintento hubiese sido
+  // exitoso, y la corrección se pierde en silencio).
+  const lastSignature = useRef<string | null>(null);
 
   const selectedMethod = paymentMethods.find((m) => m.name === pago) ?? null;
   const cuotaOptions = selectedMethod?.installments ?? [];
@@ -130,23 +137,33 @@ export function NuevaVentaClient({
     return [...new Set(pool.map((v) => v.size).filter(Boolean))] as string[];
   }, [variants, color]);
 
+  // Cuando el producto tiene más de una variante pero ninguna se distingue por
+  // color/talle (opciones de Shopify con otro nombre, ej. "Modelo"), no hay
+  // forma segura de adivinar cuál se vendió: se ofrece un picker genérico por
+  // optionLabel en vez de descontarle stock a `variants[0]` a ciegas.
+  const isAmbiguous = (variants?.length ?? 0) > 1 && colors.length === 0 && sizes.length === 0;
+
   const selectedVariant = useMemo(() => {
     if (!variants) return null;
+    if (variants.length <= 1) return variants[0] ?? null;
+    if (isAmbiguous) return variants.find((v) => v.optionLabel === genericLabel) ?? null;
     return (
       variants.find(
         (v) => (color ? v.color === color : true) && (talle ? v.size === talle : true),
       ) ?? null
     );
-  }, [variants, color, talle]);
+  }, [variants, color, talle, isAmbiguous, genericLabel]);
 
   const needsColor = colors.length > 0 && !color;
   const needsTalle = sizes.length > 0 && !talle;
+  const needsGeneric = isAmbiguous && !genericLabel;
 
   async function pickProduct(p: PickerProduct) {
     setProduct(p);
     setSearch("");
     setColor(null);
     setTalle(null);
+    setGenericLabel(null);
     setVariants(null);
     if (!price) setPrice(String(p.price || ""));
     setLoadingVariants(true);
@@ -175,6 +192,7 @@ export function NuevaVentaClient({
     if (discountNum < 0 || discountNum >= 1) return toast.error("Descuento inválido (0–99%)");
     if (!otherBrand && (needsColor || needsTalle))
       return toast.error("Elegí color y talle de la variante vendida");
+    if (!otherBrand && needsGeneric) return toast.error("Elegí la variante vendida");
     if (!otherBrand && selectedVariant && selectedVariant.available < qtyNum) {
       const ok = confirm(
         `La variante tiene stock ${selectedVariant.available} y estás vendiendo ${qtyNum}. ¿Registrar igual?`,
@@ -188,7 +206,22 @@ export function NuevaVentaClient({
       // Clave de idempotencia: se genera una vez y se reusa en los reintentos
       // de ESTA venta. Si la request se duplica (doble tap, retry del browser,
       // respuesta perdida), el server devuelve la venta original en vez de
-      // registrarla de nuevo y descontar stock dos veces.
+      // registrarla de nuevo y descontar stock dos veces. Si los datos
+      // cambiaron desde el último intento (el usuario corrigió algo), se
+      // descarta la clave vieja: si no, el reintento "exitoso" devolvería la
+      // venta original con los datos viejos.
+      const signature = JSON.stringify({
+        soldAt, qty: qtyNum, price: priceNum, discount: discountNum,
+        pago, cuotas, punto, invoiced, delivered, notes,
+        custName, custDni, custContact, custAddress,
+        otherBrand, brand, freeArticle, freeColor, freeTalle,
+        productId: product?.id ?? null, color, talle, variantId: selectedVariant?.id ?? null,
+        invoiceFile: invoiceFile ? `${invoiceFile.name}:${invoiceFile.size}:${invoiceFile.lastModified}` : null,
+      });
+      if (idempotencyKey.current && lastSignature.current !== signature) {
+        idempotencyKey.current = null;
+      }
+      lastSignature.current = signature;
       if (!idempotencyKey.current) idempotencyKey.current = crypto.randomUUID();
 
       // Subir la factura adjunta (si se marcó factura y se eligió archivo).
@@ -328,6 +361,7 @@ export function NuevaVentaClient({
                           setVariants(null);
                           setColor(null);
                           setTalle(null);
+                          setGenericLabel(null);
                         }}
                       >
                         Cambiar
@@ -428,7 +462,19 @@ export function NuevaVentaClient({
                               </div>
                             </>
                           )}
-                          {selectedVariant && !needsColor && !needsTalle && (
+                          {isAmbiguous && (
+                            <>
+                              <div className="mono text-[10px] text-mut">VARIANTE</div>
+                              <div className="mt-2.5">
+                                <Dropdown
+                                  value={genericLabel ?? "Elegir variante"}
+                                  options={(variants ?? []).map((v) => v.optionLabel)}
+                                  onChange={setGenericLabel}
+                                />
+                              </div>
+                            </>
+                          )}
+                          {selectedVariant && !needsColor && !needsTalle && !needsGeneric && (
                             <p className="mono mt-4 text-[10px] text-mut">
                               Variante seleccionada · stock {selectedVariant.available}u — al registrar se
                               descuenta automáticamente.

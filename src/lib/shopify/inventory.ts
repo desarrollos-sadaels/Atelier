@@ -103,6 +103,22 @@ export async function getProductVariants(shopifyId: string): Promise<ProductVari
   };
 }
 
+/** Resuelve a qué producto pertenece un inventory item (para el webhook inventory_levels/update). */
+export async function getProductIdByInventoryItem(inventoryItemId: string): Promise<string | null> {
+  const data = await shopifyGraphql<{
+    inventoryItem: { variant: { product: { id: string } | null } | null } | null;
+  }>(
+    `query InventoryItemProduct($id: ID!) {
+      inventoryItem(id: $id) {
+        variant { product { id } }
+      }
+    }`,
+    { id: inventoryItemId },
+  );
+  const gid = data.inventoryItem?.variant?.product?.id;
+  return gid ? gid.split("/").pop()! : null;
+}
+
 /** Ajusta el inventario disponible por variante (delta) en la location primaria. */
 export async function adjustInventory(
   changes: { inventoryItemId: string; delta: number }[],
