@@ -7,6 +7,8 @@ import { LearningsPanel } from "@/components/LearningsPanel";
 import { formatARS, getRealRevenueByMetaCampaignId } from "@/lib/queries";
 import { isMetaConfigured } from "@/lib/meta/client";
 import { isLearningsEnabled } from "@/lib/meta/learnings";
+import { isShopifyConfigured } from "@/lib/shopify/client";
+import { getShopifyOverview } from "@/lib/shopify/analytics";
 import {
   getMetaOverview,
   getActiveCampaigns,
@@ -23,6 +25,16 @@ const nf = (n: number) => intFmt.format(n);
 
 export default async function MetricasPage() {
   if (!isMetaConfigured()) return <NotConnected />;
+
+  // Arranca en paralelo con todo lo de Meta de abajo — se espera recién al renderizar.
+  const shopifyPromise = isShopifyConfigured()
+    ? getShopifyOverview()
+        .then((overview) => ({ overview, error: null as string | null }))
+        .catch((e) => ({
+          overview: null,
+          error: e instanceof Error ? e.message : "No se pudieron cargar las métricas de Shopify",
+        }))
+    : Promise.resolve({ overview: null, error: null });
 
   let campaigns: MetaCampaign[] = [];
   let topAds: MetaAd[] = [];
@@ -61,6 +73,8 @@ export default async function MetricasPage() {
   // ROAS real: ingreso de sales.ts (productos vinculados) / gasto de Meta.
   const realRevenue = await getRealRevenueByMetaCampaignId(campaigns.map((c) => c.id));
 
+  const { overview: shopifyOverview, error: shopifyError } = await shopifyPromise;
+
   return (
     <>
       <PageHeader
@@ -81,6 +95,44 @@ export default async function MetricasPage() {
         <div className="mt-6 rounded-[4px] border border-acc/30 bg-acc/5 px-4 py-3 text-[13px] text-acc">
           {loadError}
         </div>
+      )}
+
+      <div className="mt-9 flex items-center justify-between">
+        <h2 className="font-serif text-[22px] tracking-tight">Shopify</h2>
+        <span className="mono text-[11px] text-mut">Últimos 7 días · pedidos reales</span>
+      </div>
+      {!isShopifyConfigured() ? (
+        <div className="mt-4 rounded-[4px] border border-dashed border-line px-4 py-3 text-[12px] text-mut">
+          Shopify no está conectado.{" "}
+          <Link href="/configuracion" className="underline">
+            Conectar
+          </Link>
+          .
+        </div>
+      ) : shopifyError ? (
+        <div className="mt-4 rounded-[4px] border border-acc/30 bg-acc/5 px-4 py-3 text-[13px] text-acc">
+          {shopifyError}
+        </div>
+      ) : (
+        shopifyOverview && (
+          <div className="mt-4">
+            <KpiRow
+              items={[
+                {
+                  label: "Ingresos",
+                  value: formatARS(shopifyOverview.revenue),
+                  sub: "ventas de la tienda",
+                },
+                { label: "Pedidos", value: nf(shopifyOverview.orders), sub: "no cancelados" },
+                {
+                  label: "Ticket promedio",
+                  value: formatARS(shopifyOverview.aov),
+                  sub: "ingresos / pedidos",
+                },
+              ]}
+            />
+          </div>
+        )
       )}
 
       {!loadError && topAds.length > 0 && (
