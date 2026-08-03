@@ -7,7 +7,8 @@ import { Card, CardTitle, btnCls } from "@/components/ui";
 import { Dropdown } from "@/components/Dropdown";
 import { DemoBlock } from "@/components/DemoBlock";
 import type { MetaCampaignOption } from "@/lib/meta/campaigns";
-import { metaStatusLabel, type DemographicRow } from "@/lib/meta/insights";
+import type { DemographicRow } from "@/lib/meta/insights";
+import { metaStatusLabel } from "@/lib/meta/status";
 
 const NO_CAMPAIGN = "Seleccionar campaña…";
 
