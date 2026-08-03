@@ -7,6 +7,7 @@ import { normalizeCategory } from "@/lib/categories";
 import { normalizeRole, type Role } from "@/lib/roles";
 import { parsePaymentMethods, DEFAULT_PAYMENT_METHODS, type PaymentMethod } from "@/lib/payments";
 import { parseNotificationSettings, type NotificationSettings } from "@/lib/notifications";
+import { saleNet } from "@/lib/sales";
 
 export type { UiProduct };
 
@@ -261,6 +262,76 @@ export async function getTodaySales(): Promise<{ totalAmount: number; operations
   const { start, end } = todayRangeART();
   const { totalAmount, operations } = await getSalesKpis(start, end);
   return { totalAmount, operations };
+}
+
+// ---------- meta (ROAS real) ----------
+
+/** [hoy-7, hoy) en Buenos Aires — mismo criterio que el "last_7d" de Meta. */
+function last7DaysRangeART(): { start: string; end: string } {
+  const { start: today } = todayRangeART();
+  const [y, m, d] = today.split("-").map(Number);
+  const from = new Date(Date.UTC(y, m - 1, d - 7));
+  const start = `${from.getUTCFullYear()}-${String(from.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    from.getUTCDate(),
+  ).padStart(2, "0")}`;
+  return { start, end: today };
+}
+
+/**
+ * Ingreso real (tabla `sales`, últimos 7 días) de los productos vinculados a
+ * cada campaña de Meta — para calcular un ROAS real (venta efectiva / gasto)
+ * en vez del que reporta la propia Meta (atribución de su Pixel/CAPI).
+ */
+export async function getRealRevenueByMetaCampaignId(
+  metaCampaignIds: string[],
+): Promise<Record<string, number>> {
+  if (!isSupabaseConfigured() || metaCampaignIds.length === 0) return {};
+  const supabase = await createClient();
+
+  const { data: campaignRows } = await supabase
+    .from("campaigns")
+    .select("id, meta_campaign_id")
+    .in("meta_campaign_id", metaCampaignIds);
+  if (!campaignRows?.length) return {};
+
+  const internalToMeta = new Map(
+    campaignRows
+      .filter((c): c is { id: string; meta_campaign_id: string } => Boolean(c.meta_campaign_id))
+      .map((c) => [c.id, c.meta_campaign_id]),
+  );
+
+  const { data: links } = await supabase
+    .from("product_campaign_links")
+    .select("product_id, campaign_id")
+    .in("campaign_id", [...internalToMeta.keys()]);
+  if (!links?.length) return {};
+
+  const productToMeta = new Map<string, string>();
+  for (const l of links) {
+    const meta = internalToMeta.get(l.campaign_id);
+    if (meta) productToMeta.set(l.product_id, meta);
+  }
+  if (!productToMeta.size) return {};
+
+  // Arranca en 0 (no `undefined`) para toda campaña CON producto vinculado —
+  // así el caller distingue "vinculada, 0 ventas" de "sin vincular" (sin key).
+  const revenue: Record<string, number> = {};
+  for (const meta of productToMeta.values()) revenue[meta] = 0;
+
+  const { start, end } = last7DaysRangeART();
+  const { data: sales } = await supabase
+    .from("sales")
+    .select("product_id, price, discount, qty")
+    .in("product_id", [...productToMeta.keys()])
+    .gte("sold_at", start)
+    .lt("sold_at", end);
+
+  for (const s of sales ?? []) {
+    const meta = s.product_id ? productToMeta.get(s.product_id) : undefined;
+    if (!meta) continue;
+    revenue[meta] += saleNet(s);
+  }
+  return revenue;
 }
 
 // ---------- settings ----------

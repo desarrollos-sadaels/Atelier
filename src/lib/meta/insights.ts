@@ -1,6 +1,32 @@
 import "server-only";
 import { metaGraph, metaAccountId } from "@/lib/meta/client";
 
+/* ---------- estado (Meta lo devuelve en SCREAMING_SNAKE_CASE) ---------- */
+
+const STATUS_LABEL: Record<string, string> = {
+  ACTIVE: "Activa",
+  PAUSED: "Pausada",
+  CAMPAIGN_PAUSED: "Pausada (campaña)",
+  ADSET_PAUSED: "Pausada (conjunto)",
+  ARCHIVED: "Archivada",
+  DELETED: "Eliminada",
+  IN_PROCESS: "En revisión",
+  PENDING_REVIEW: "Pendiente de revisión",
+  PENDING_BILLING_INFO: "Falta info de facturación",
+  WITH_ISSUES: "Con problemas",
+  DISAPPROVED: "Rechazada",
+  PREAPPROVED: "Preaprobada",
+  DISABLED: "Deshabilitada",
+};
+
+/** Traduce el estado crudo de Meta (ACTIVE, CAMPAIGN_PAUSED, ...) a un rótulo legible. */
+export function metaStatusLabel(raw: string | null | undefined): string {
+  if (!raw) return "—";
+  if (STATUS_LABEL[raw]) return STATUS_LABEL[raw];
+  const words = raw.toLowerCase().split("_");
+  return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
 /* ---------- tipos ---------- */
 
 type RawAction = { action_type: string; value: string };
@@ -33,6 +59,9 @@ export type MetaCampaign = {
   purchases: number;
   roas: number;
 };
+
+/** Mismo shape que MetaCampaign — usado para anuncios (creatividades) individuales. */
+export type MetaAd = MetaCampaign;
 
 export type DemographicRow = { label: string; reach: number };
 export type CampaignDemographics = {
@@ -84,36 +113,56 @@ export async function getMetaOverview(): Promise<MetaOverview> {
   };
 }
 
+type MetaEntityRow = {
+  id: string;
+  name: string;
+  effective_status: string;
+  insights?: { data: RawInsight[] };
+};
+
+function mapEntityRow(row: MetaEntityRow): MetaCampaign {
+  const ins = row.insights?.data?.[0] ?? {};
+  return {
+    id: row.id,
+    name: row.name,
+    status: row.effective_status,
+    spend: num(ins.spend),
+    reach: num(ins.reach),
+    impressions: num(ins.impressions),
+    clicks: num(ins.clicks),
+    ctr: num(ins.ctr),
+    purchases: purchasesFrom(ins.actions),
+    roas: roasFrom(ins.purchase_roas),
+  };
+}
+
+const INSIGHT_FIELDS =
+  "insights.date_preset(last_7d){spend,reach,impressions,clicks,ctr,actions,purchase_roas}";
+
 /** Campañas activas con sus métricas (últimos 7 días). */
 export async function getActiveCampaigns(): Promise<MetaCampaign[]> {
   const acct = metaAccountId();
-  type Row = {
-    id: string;
-    name: string;
-    effective_status: string;
-    insights?: { data: RawInsight[] };
-  };
-  const res = await metaGraph<{ data: Row[] }>(`${acct}/campaigns`, {
-    fields:
-      "id,name,effective_status,insights.date_preset(last_7d){spend,reach,impressions,clicks,ctr,actions,purchase_roas}",
+  const res = await metaGraph<{ data: MetaEntityRow[] }>(`${acct}/campaigns`, {
+    fields: `id,name,effective_status,${INSIGHT_FIELDS}`,
     effective_status: JSON.stringify(["ACTIVE"]),
     limit: 200,
   });
-  return (res.data ?? []).map((c) => {
-    const ins = c.insights?.data?.[0] ?? {};
-    return {
-      id: c.id,
-      name: c.name,
-      status: c.effective_status,
-      spend: num(ins.spend),
-      reach: num(ins.reach),
-      impressions: num(ins.impressions),
-      clicks: num(ins.clicks),
-      ctr: num(ins.ctr),
-      purchases: purchasesFrom(ins.actions),
-      roas: roasFrom(ins.purchase_roas),
-    };
+  return (res.data ?? []).map(mapEntityRow);
+}
+
+/** Top N anuncios (creatividades) por ROAS de los últimos 7 días, entre los que tuvieron gasto. */
+export async function getTopAds(limit = 3): Promise<MetaAd[]> {
+  const acct = metaAccountId();
+  const res = await metaGraph<{ data: MetaEntityRow[] }>(`${acct}/ads`, {
+    fields: `id,name,effective_status,${INSIGHT_FIELDS}`,
+    effective_status: JSON.stringify(["ACTIVE"]),
+    limit: 200,
   });
+  return (res.data ?? [])
+    .map(mapEntityRow)
+    .filter((ad) => ad.spend > 0)
+    .sort((a, b) => b.roas - a.roas || b.purchases - a.purchases)
+    .slice(0, limit);
 }
 
 const GENDER_ES: Record<string, string> = {

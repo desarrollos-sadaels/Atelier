@@ -7,7 +7,7 @@ import { Card, CardTitle, btnCls } from "@/components/ui";
 import { Dropdown } from "@/components/Dropdown";
 import { DemoBlock } from "@/components/DemoBlock";
 import type { MetaCampaignOption } from "@/lib/meta/campaigns";
-import type { DemographicRow } from "@/lib/meta/insights";
+import { metaStatusLabel, type DemographicRow } from "@/lib/meta/insights";
 
 const NO_CAMPAIGN = "Seleccionar campaña…";
 
@@ -82,7 +82,7 @@ export function CampaignLinkCard({
           <>
             <div className="flex items-center justify-between">
               <div className="text-[15px] font-medium">{link.name}</div>
-              <span className="mono text-[10px] text-mut">{link.status ?? "—"}</span>
+              <span className="mono text-[10px] text-mut">{metaStatusLabel(link.status)}</span>
             </div>
             <p className="mono mt-3 text-[11px] leading-relaxed text-mut">
               Si este producto se queda sin stock, avisamos al equipo de medios (campanita + email).
