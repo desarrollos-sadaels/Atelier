@@ -2,10 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireRole } from "@/lib/api-auth";
 import { isMetaConfigured } from "@/lib/meta/client";
 import { getActiveCampaigns, getCampaignDemographics } from "@/lib/meta/insights";
-import { generateCampaignLearnings } from "@/lib/meta/learnings";
+import { generateCampaignLearnings, isLearningsEnabled } from "@/lib/meta/learnings";
 import { getRealRevenueByMetaCampaignId } from "@/lib/queries";
 
 export async function POST(req: NextRequest) {
+  if (!isLearningsEnabled()) {
+    return NextResponse.json({ ok: false, error: "No encontrado" }, { status: 404 });
+  }
   const auth = await requireRole(["admin", "medios"]);
   if ("error" in auth) {
     return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });

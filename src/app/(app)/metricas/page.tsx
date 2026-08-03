@@ -6,6 +6,7 @@ import { DemoBlock } from "@/components/DemoBlock";
 import { LearningsPanel } from "@/components/LearningsPanel";
 import { formatARS, getRealRevenueByMetaCampaignId } from "@/lib/queries";
 import { isMetaConfigured } from "@/lib/meta/client";
+import { isLearningsEnabled } from "@/lib/meta/learnings";
 import {
   getMetaOverview,
   getActiveCampaigns,
@@ -197,7 +198,7 @@ function CampaignCard({
         </div>
       )}
 
-      <LearningsPanel metaCampaignId={c.id} />
+      {isLearningsEnabled() && <LearningsPanel metaCampaignId={c.id} />}
     </Card>
   );
 }

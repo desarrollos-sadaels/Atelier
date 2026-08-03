@@ -18,6 +18,15 @@ const InsightSchema = z.object({
 
 export type CampaignInsight = z.infer<typeof InsightSchema>["insights"][number];
 
+/**
+ * Feature flag de despliegue: el código de Learnings viaja con cada deploy,
+ * pero se activa recién cuando LEARNINGS_ENABLED=true en el entorno — así se
+ * puede mergear a production y probarlo en preview antes de encenderlo ahí.
+ */
+export function isLearningsEnabled(): boolean {
+  return process.env.LEARNINGS_ENABLED === "true";
+}
+
 export type CampaignLearningsInput = {
   campaignName: string;
   spend: number;
