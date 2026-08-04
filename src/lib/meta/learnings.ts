@@ -1,6 +1,7 @@
 import "server-only";
-import { generateText, Output } from "ai";
+import { ToolLoopAgent, Output, tool, isStepCount } from "ai";
 import { z } from "zod";
+import { getCustomerSegments, getRetention, getProductAffinity } from "@/lib/meta/customer-insights";
 
 const InsightSchema = z.object({
   insights: z
@@ -37,33 +38,95 @@ export type CampaignLearningsInput = {
   realRoas: number | null;
   byAgeGender: { label: string; reach: number }[];
   byRegion: { label: string; reach: number }[];
+  /** Producto vinculado a la campaña, si tiene uno — habilita las skills de clientes. */
+  productId: string | null;
 };
 
-/**
- * Insights de marketing generados por IA a partir de la demografía y
- * performance real de una campaña. Groundeado únicamente en los números que
- * se le pasan — no tiene acceso a nada más, así que no puede inventar datos
- * externos (solo interpretarlos mal, que es un riesgo distinto).
- */
-export async function generateCampaignLearnings(
-  input: CampaignLearningsInput,
-): Promise<CampaignInsight[]> {
-  const { output } = await generateText({
-    model: "anthropic/claude-sonnet-5",
-    output: Output.object({ schema: InsightSchema }),
-    prompt: `Sos un analista de marketing digital para una marca de indumentaria de moda en Argentina que vende por Shopify y pauta en Meta Ads (Facebook/Instagram).
+type ProductContext = { productId: string | null };
 
-Te paso los datos reales de UNA campaña, últimos 7 días de gasto/alcance y 30 días de demografía:
+const INSTRUCTIONS = `Sos un analista de marketing digital para una marca de indumentaria de moda en Argentina que vende por Shopify y pauta en Meta Ads (Facebook/Instagram).
 
-${JSON.stringify(input, null, 2)}
+Te van a pasar los datos reales de UNA campaña (últimos 7 días de gasto/alcance/ROAS, 30 días de demografía). Además tenés tres herramientas que consultan el historial real de compras del producto vinculado a esa campaña — usalas cuando te ayuden a dar un insight más concreto, no hace falta usarlas todas:
+- segmentacionClientes: en qué segmento (Campeones/En riesgo/Dormidos/Nuevos) están los compradores de este producto, según su historial completo de compras.
+- retencionClientes: qué porcentaje de los que compraron este producto volvió a comprar algo después.
+- combosDeCompra: qué otros productos compran los mismos clientes (para sugerir bundles o cross-sell).
+
+Si una herramienta te avisa que la campaña no tiene producto vinculado o no hay compradores todavía, no la menciones en los insights — trabajá con lo que sí tengas.
 
 "realRoas" es el retorno calculado con ventas reales de la tienda (ingreso real / gasto), a diferencia de "metaRoas" que es el que reporta la atribución propia de Meta (puede sobreestimar). Si "realRoas" es null, no hay suficientes ventas vinculadas todavía para calcularlo — no lo menciones como si fuera cero.
 
 Escribí entre 3 y 5 insights accionables en español rioplatense, tono directo y práctico (nada de relleno genérico tipo "es importante monitorear"). Cada insight tiene que:
-- Basarse ÚNICAMENTE en los números de arriba — nunca inventes datos, tendencias externas o benchmarks que no estén en el JSON.
-- Nombrar un número concreto de los datos (porcentaje, segmento, monto) en el "detail".
+- Basarse ÚNICAMENTE en los números de la campaña y en lo que devuelvan tus herramientas — nunca inventes datos, tendencias externas o benchmarks que no estén ahí.
+- Nombrar un número concreto (porcentaje, segmento, monto) en el "detail".
 - Si metaRoas y realRoas difieren mucho, señalalo como uno de los insights.
-- Sugerir una acción concreta cuando tenga sentido (ej: reforzar un segmento, ajustar targeting, pausar y revisar creativo).`,
+- Sugerir una acción concreta cuando tenga sentido (ej: reforzar el segmento Campeones, armar un combo con el producto más afín, reactivar Dormidos, ajustar targeting, pausar y revisar creativo).`;
+
+// Las tools no dependen del producto — lo reciben vía toolsContext (fijado al
+// construir el agente, la versión instalada del SDK no lo acepta por-llamada).
+const learningsTools = {
+  segmentacionClientes: tool({
+    description:
+      "Segmenta a los compradores del producto vinculado a esta campaña en Campeones/En riesgo/Dormidos/Nuevos, según todo su historial de compras.",
+    inputSchema: z.object({}),
+    contextSchema: z.object({ productId: z.string().nullable() }),
+    execute: async (_input, { context }: { context: ProductContext }) => {
+      if (!context.productId) {
+        return { note: "Esta campaña no tiene un producto vinculado." };
+      }
+      return getCustomerSegments(context.productId);
+    },
+  }),
+  retencionClientes: tool({
+    description:
+      "Calcula qué porcentaje de los compradores del producto vinculado a esta campaña volvió a comprar (cualquier producto) después.",
+    inputSchema: z.object({}),
+    contextSchema: z.object({ productId: z.string().nullable() }),
+    execute: async (_input, { context }: { context: ProductContext }) => {
+      if (!context.productId) {
+        return { note: "Esta campaña no tiene un producto vinculado." };
+      }
+      return getRetention(context.productId);
+    },
+  }),
+  combosDeCompra: tool({
+    description:
+      "Trae los productos que más compran en común los clientes que compraron el producto vinculado a esta campaña (para bundles/cross-sell).",
+    inputSchema: z.object({}),
+    contextSchema: z.object({ productId: z.string().nullable() }),
+    execute: async (_input, { context }: { context: ProductContext }) => {
+      if (!context.productId) {
+        return { note: "Esta campaña no tiene un producto vinculado." };
+      }
+      return getProductAffinity(context.productId);
+    },
+  }),
+};
+
+/**
+ * Insights de marketing generados por un agente de IA con acceso a datos
+ * reales de la campaña y, si hay producto vinculado, a su historial de
+ * compras (segmentación, retención, combos) — decide él mismo qué consultar.
+ */
+export async function generateCampaignLearnings(
+  input: CampaignLearningsInput,
+): Promise<CampaignInsight[]> {
+  const { productId, ...campaignData } = input;
+
+  const agent = new ToolLoopAgent({
+    model: "anthropic/claude-sonnet-5",
+    output: Output.object({ schema: InsightSchema }),
+    instructions: INSTRUCTIONS,
+    tools: learningsTools,
+    stopWhen: isStepCount(6),
+    toolsContext: {
+      segmentacionClientes: { productId },
+      retencionClientes: { productId },
+      combosDeCompra: { productId },
+    },
+  });
+
+  const { output } = await agent.generate({
+    prompt: `Datos reales de esta campaña, últimos 7 días de gasto/alcance y 30 días de demografía:\n\n${JSON.stringify(campaignData, null, 2)}`,
   });
   return output.insights;
 }

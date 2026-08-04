@@ -334,6 +334,26 @@ export async function getRealRevenueByMetaCampaignId(
   return revenue;
 }
 
+/** Producto vinculado a una campaña de Meta, si tiene uno (para las skills de Learnings). */
+export async function getLinkedProductId(metaCampaignId: string): Promise<string | null> {
+  if (!isSupabaseConfigured()) return null;
+  const supabase = await createClient();
+
+  const { data: campaign } = await supabase
+    .from("campaigns")
+    .select("id")
+    .eq("meta_campaign_id", metaCampaignId)
+    .maybeSingle();
+  if (!campaign) return null;
+
+  const { data: link } = await supabase
+    .from("product_campaign_links")
+    .select("product_id")
+    .eq("campaign_id", campaign.id)
+    .maybeSingle();
+  return link?.product_id ?? null;
+}
+
 // ---------- settings ----------
 
 /** Métodos de pago configurables (fallback a DEFAULT_PAYMENT_METHODS). */

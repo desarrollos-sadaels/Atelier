@@ -3,7 +3,7 @@ import { requireRole } from "@/lib/api-auth";
 import { isMetaConfigured } from "@/lib/meta/client";
 import { getActiveCampaigns, getCampaignDemographics } from "@/lib/meta/insights";
 import { generateCampaignLearnings, isLearningsEnabled } from "@/lib/meta/learnings";
-import { getRealRevenueByMetaCampaignId } from "@/lib/queries";
+import { getLinkedProductId, getRealRevenueByMetaCampaignId } from "@/lib/queries";
 
 export async function POST(req: NextRequest) {
   if (!isLearningsEnabled()) {
@@ -30,10 +30,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const [campaigns, demo, revenue] = await Promise.all([
+    const [campaigns, demo, revenue, productId] = await Promise.all([
       getActiveCampaigns(),
       getCampaignDemographics(metaCampaignId),
       getRealRevenueByMetaCampaignId([metaCampaignId]),
+      getLinkedProductId(metaCampaignId),
     ]);
     const campaign = campaigns.find((c) => c.id === metaCampaignId);
     if (!campaign) {
@@ -56,6 +57,7 @@ export async function POST(req: NextRequest) {
       realRoas,
       byAgeGender: demo.byAgeGender,
       byRegion: demo.byRegion,
+      productId,
     });
 
     return NextResponse.json({ ok: true, insights });
