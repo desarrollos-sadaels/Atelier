@@ -13,7 +13,7 @@ import { X } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
 import { CATEGORY_OPTIONS, CATEGORY_SELECT_DEFAULT } from "@/lib/categories";
 import { cn } from "@/lib/cn";
-import type { MetaCampaignOption } from "@/lib/meta/campaigns";
+import type { MetaCampaignOption } from "@/lib/meta/types";
 
 const TALLES = ["XS", "S", "M", "L", "XL", "XXL"];
 const PALETTE = [

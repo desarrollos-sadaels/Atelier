@@ -6,8 +6,7 @@ import { toast } from "sonner";
 import { Card, CardTitle, btnCls } from "@/components/ui";
 import { Dropdown } from "@/components/Dropdown";
 import { DemoBlock } from "@/components/DemoBlock";
-import type { MetaCampaignOption } from "@/lib/meta/campaigns";
-import type { DemographicRow } from "@/lib/meta/insights";
+import type { DemographicRow, MetaCampaignOption } from "@/lib/meta/types";
 import { metaStatusLabel } from "@/lib/meta/status";
 
 const NO_CAMPAIGN = "Seleccionar campaña…";

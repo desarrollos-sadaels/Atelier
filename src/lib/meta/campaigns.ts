@@ -1,8 +1,10 @@
 import "server-only";
 import { metaGraph, metaAccountId, isMetaConfigured } from "@/lib/meta/client";
+import type { MetaCampaignOption } from "@/lib/meta/types";
 
-/** Campaña de Meta lista para elegir en el picker de vinculación (cualquier estado). */
-export type MetaCampaignOption = { id: string; name: string; status: string };
+// El tipo vive en `@/lib/meta/types` (sin `server-only`) para que lo puedan importar
+// los Client Components; se re-exporta acá por compatibilidad.
+export type { MetaCampaignOption } from "@/lib/meta/types";
 
 /** Todas las campañas de la cuenta (no solo activas), para el selector de vinculación. */
 export async function getAllMetaCampaigns(): Promise<MetaCampaignOption[]> {

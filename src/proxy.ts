@@ -10,8 +10,12 @@ export async function proxy(request: NextRequest) {
   return updateSession(request);
 }
 
+// `/api` queda afuera a propósito: no está en PROTECTED, así que el proxy no tomaba
+// ninguna decisión de acceso ahí, pero igual pagaba un getUser() contra el Auth server
+// en cada llamada. Las rutas de API se autorizan solas (requireRole / SYNC_SECRET) y
+// refrescan la sesión con su propio cliente, así que sacarlas no cambia el enforcement.
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|auth|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|auth|api|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { hasAccessRestriction, isEmailAllowed } from "@/lib/supabase/config";
-import { normalizeRole, ROLE_HOME } from "@/lib/roles";
+import { normalizeRole, ROLE_HOME, type Role } from "@/lib/roles";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -14,11 +14,15 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    // `data.user` viene del propio intercambio de código contra el Auth server, o sea
+    // ya está validado: el getUser() que había acá era un viaje de red extra en el
+    // camino crítico del login.
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = data.user;
+      // Cuando el rol lo fija una invitación ya lo sabemos y nos ahorramos el
+      // select de más abajo.
+      let role: Role | null = null;
 
       // Enforce acceso: dominios/emails autorizados (env) o invitación puntual (DB).
       if (hasAccessRestriction()) {
@@ -35,12 +39,16 @@ export async function GET(request: Request) {
           if (inv) {
             allowed = true;
             // Primera aceptación: aplicar el rol invitado y marcar aceptada.
+            // Son dos tablas independientes: en serie eran dos viajes encadenados.
             if (user && !inv.accepted_at) {
-              await admin.from("profiles").update({ role: normalizeRole(inv.role) }).eq("id", user.id);
-              await admin
-                .from("invitations")
-                .update({ accepted_at: new Date().toISOString() })
-                .eq("email", email);
+              role = normalizeRole(inv.role);
+              await Promise.all([
+                admin.from("profiles").update({ role }).eq("id", user.id),
+                admin
+                  .from("invitations")
+                  .update({ accepted_at: new Date().toISOString() })
+                  .eq("email", email),
+              ]);
             }
           }
         }
@@ -53,12 +61,15 @@ export async function GET(request: Request) {
 
       // Landing según rol (salvo que venga un `next` explícito).
       if (next) return NextResponse.redirect(`${origin}${next}`);
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user?.id ?? "")
-        .maybeSingle();
-      return NextResponse.redirect(`${origin}${ROLE_HOME[normalizeRole(profile?.role)]}`);
+      if (!role) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user?.id ?? "")
+          .maybeSingle();
+        role = normalizeRole(profile?.role);
+      }
+      return NextResponse.redirect(`${origin}${ROLE_HOME[role]}`);
     }
   }
 

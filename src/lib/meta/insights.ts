@@ -1,7 +1,24 @@
 import "server-only";
 import { metaGraph, metaAccountId } from "@/lib/meta/client";
+import type {
+  CampaignDemographics,
+  MetaAd,
+  MetaCampaign,
+  MetaOverview,
+} from "@/lib/meta/types";
 
 export { metaStatusLabel } from "@/lib/meta/status";
+
+// Los tipos viven en `@/lib/meta/types` (sin `server-only`) para que los Client
+// Components puedan importarlos sin arrastrar este módulo al bundle del browser.
+// Se re-exportan acá para no romper a quien ya los importaba desde insights.
+export type {
+  CampaignDemographics,
+  DemographicRow,
+  MetaAd,
+  MetaCampaign,
+  MetaOverview,
+} from "@/lib/meta/types";
 
 /* ---------- tipos ---------- */
 
@@ -14,35 +31,6 @@ type RawInsight = {
   ctr?: string;
   actions?: RawAction[];
   purchase_roas?: RawAction[];
-};
-
-export type MetaOverview = {
-  spend: number;
-  reach: number;
-  impressions: number;
-  activeCampaigns: number;
-};
-
-export type MetaCampaign = {
-  id: string;
-  name: string;
-  status: string;
-  spend: number;
-  reach: number;
-  impressions: number;
-  clicks: number;
-  ctr: number;
-  purchases: number;
-  roas: number;
-};
-
-/** Mismo shape que MetaCampaign — usado para anuncios (creatividades) individuales. */
-export type MetaAd = MetaCampaign;
-
-export type DemographicRow = { label: string; reach: number };
-export type CampaignDemographics = {
-  byAgeGender: DemographicRow[]; // ej: "25-34 · Mujeres"
-  byRegion: DemographicRow[];
 };
 
 /* ---------- helpers ---------- */

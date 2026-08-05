@@ -1,5 +1,5 @@
 import { CardTitle } from "@/components/ui";
-import type { DemographicRow } from "@/lib/meta/insights";
+import type { DemographicRow } from "@/lib/meta/types";
 
 const intFmt = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 });
 
