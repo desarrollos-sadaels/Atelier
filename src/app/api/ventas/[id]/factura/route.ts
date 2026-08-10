@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/api-auth";
+import { isValidInvoicePath } from "@/lib/sales";
 
 /** Redirige a una signed URL de la factura adjunta (bucket privado). */
 export async function GET(
@@ -24,6 +25,11 @@ export async function GET(
     .maybeSingle();
   if (!sale?.invoice_path) {
     return NextResponse.json({ ok: false, error: "Sin factura adjunta" }, { status: 404 });
+  }
+  // Defensa en profundidad: la validación fuerte está al guardar la venta, pero
+  // esto también cubre las filas cargadas antes de que existiera esa validación.
+  if (!isValidInvoicePath(sale.invoice_path)) {
+    return NextResponse.json({ ok: false, error: "Factura inválida" }, { status: 400 });
   }
 
   const { data, error } = await supaAdmin.storage

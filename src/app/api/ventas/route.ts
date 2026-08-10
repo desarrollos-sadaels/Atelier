@@ -4,6 +4,7 @@ import { isShopifyConfigured } from "@/lib/shopify/client";
 import { adjustInventory, getProductVariants } from "@/lib/shopify/inventory";
 import { requireRole } from "@/lib/api-auth";
 import { notifyLowStock } from "@/lib/notify";
+import { isValidInvoicePath } from "@/lib/sales";
 import type { TablesInsert } from "@/lib/supabase/types";
 
 function str(v: unknown): string | null {
@@ -54,6 +55,13 @@ export async function POST(req: NextRequest) {
   const inventoryItemId = !isOtherBrand ? str(body.inventoryItemId) : null;
   const idempotencyKey = str(body.idempotencyKey);
 
+  // El path de la factura lo manda el cliente; después se firma con service_role
+  // (que ignora RLS). Solo aceptamos la forma que produce nuestro uploader.
+  const invoicePath = Boolean(body.invoiced) ? str(body.invoicePath) : null;
+  if (invoicePath && !isValidInvoicePath(invoicePath)) {
+    return NextResponse.json({ ok: false, error: "Factura inválida" }, { status: 400 });
+  }
+
   const row: TablesInsert<"sales"> = {
     ...(soldAt ? { sold_at: soldAt } : {}),
     seller_id: auth.identity.userId,
@@ -76,7 +84,7 @@ export async function POST(req: NextRequest) {
     installments,
     pos: str(body.pos),
     invoiced: Boolean(body.invoiced),
-    invoice_path: Boolean(body.invoiced) ? str(body.invoicePath) : null,
+    invoice_path: invoicePath,
     delivered: Boolean(body.delivered),
     notes: str(body.notes),
     idempotency_key: idempotencyKey,

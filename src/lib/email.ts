@@ -48,11 +48,34 @@ export async function sendEmail({
   }
 }
 
-/** Wrapper HTML mínimo con la marca, para los mails transaccionales. */
+/**
+ * Escapa un valor para interpolarlo en el HTML de un mail.
+ *
+ * Los mails arman markup a mano (no hay JSX que escape solo), y los valores que
+ * se interpolan —nombre de producto, SKU, nombre de campaña— vienen de Shopify y
+ * de la DB, no de constantes del código. Sin escapar, cualquiera que pueda
+ * nombrar un producto inyecta markup en la casilla de los admins.
+ */
+export function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Wrapper HTML mínimo con la marca, para los mails transaccionales.
+ *
+ * `title` es texto plano y se escapa acá. `bodyHtml` es HTML: cualquier valor
+ * dinámico que se interpole ahí lo tiene que escapar el que lo arma, con
+ * `escapeHtml()`.
+ */
 export function emailShell(title: string, bodyHtml: string): string {
   return `<div style="font-family:ui-sans-serif,system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a">
     <div style="font-size:20px;font-weight:600;letter-spacing:-0.02em;padding:8px 0 16px">Atelier</div>
-    <div style="font-size:16px;font-weight:600;margin-bottom:12px">${title}</div>
+    <div style="font-size:16px;font-weight:600;margin-bottom:12px">${escapeHtml(title)}</div>
     ${bodyHtml}
     <div style="margin-top:24px;padding-top:12px;border-top:1px solid #eee;font-size:11px;color:#888">
       Atelier · Control de stock · Sadaels

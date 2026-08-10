@@ -3,12 +3,12 @@ import { isShopifyConfigured } from "@/lib/shopify/client";
 import { isAdminConfigured } from "@/lib/supabase/admin";
 import { syncProducts } from "@/lib/shopify/sync";
 import { isVercelDeployment } from "@/lib/env";
+import { hasValidSecret } from "@/lib/secrets";
 
 function authorized(request: Request): boolean {
   const secret = process.env.SYNC_SECRET;
   if (secret) {
-    const auth = request.headers.get("authorization");
-    return auth === `Bearer ${secret}` || request.headers.get("x-sync-secret") === secret;
+    return hasValidSecret(request, secret);
   }
   // Sin SYNC_SECRET solo se permite en local. Antes esto devolvía `true` sin
   // más, así que un deploy al que le faltara la env var dejaba el sync de todo

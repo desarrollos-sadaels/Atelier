@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { isVercelDeployment } from "@/lib/env";
+import { hasValidSecret } from "@/lib/secrets";
 
 /**
  * Diagnóstico de conexión a la DB (usa la service_role key).
@@ -12,8 +13,7 @@ import { isVercelDeployment } from "@/lib/env";
 function authorized(request: Request): boolean {
   const secret = process.env.SYNC_SECRET;
   if (secret) {
-    const auth = request.headers.get("authorization");
-    return auth === `Bearer ${secret}` || request.headers.get("x-sync-secret") === secret;
+    return hasValidSecret(request, secret);
   }
   return !isVercelDeployment();
 }
