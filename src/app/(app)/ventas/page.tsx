@@ -11,6 +11,7 @@ import {
   formatARS,
   SALES_PAGE_SIZE,
 } from "@/lib/queries";
+import { uiRole } from "@/lib/roles";
 import { VentasClient } from "./VentasClient";
 
 function currentMonth(): string {
@@ -44,7 +45,7 @@ export default async function VentasPage({
     getSalesKpis(start, end),
     getSales(start, end, { q: search, page }),
   ]);
-  const role = profile?.role ?? "admin";
+  const role = uiRole(profile?.role);
 
   const [y, m] = month.split("-").map(Number);
   const monthLabel = MONTH_LABEL.format(new Date(y, m - 1, 1));
