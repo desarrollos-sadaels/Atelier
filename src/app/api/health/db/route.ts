@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
-import { isVercelDeployment } from "@/lib/env";
+import { allowsInsecureLocalFallback } from "@/lib/env";
 import { hasValidSecret } from "@/lib/secrets";
 
 /**
@@ -15,7 +15,8 @@ function authorized(request: Request): boolean {
   if (secret) {
     return hasValidSecret(request, secret);
   }
-  return !isVercelDeployment();
+  // Sin SYNC_SECRET solo se permite en `next dev`.
+  return allowsInsecureLocalFallback();
 }
 
 export async function GET(request: Request) {

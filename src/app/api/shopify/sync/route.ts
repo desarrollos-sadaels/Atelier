@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { isAdminConfigured } from "@/lib/supabase/admin";
 import { syncProducts } from "@/lib/shopify/sync";
-import { isVercelDeployment } from "@/lib/env";
+import { allowsInsecureLocalFallback } from "@/lib/env";
 import { hasValidSecret } from "@/lib/secrets";
 
 function authorized(request: Request): boolean {
@@ -10,10 +10,10 @@ function authorized(request: Request): boolean {
   if (secret) {
     return hasValidSecret(request, secret);
   }
-  // Sin SYNC_SECRET solo se permite en local. Antes esto devolvía `true` sin
-  // más, así que un deploy al que le faltara la env var dejaba el sync de todo
-  // el catálogo abierto a cualquiera.
-  return !isVercelDeployment();
+  // Sin SYNC_SECRET solo se permite en `next dev`. Antes esto devolvía `true`
+  // sin más, así que un deploy al que le faltara la env var dejaba el sync de
+  // todo el catálogo abierto a cualquiera.
+  return allowsInsecureLocalFallback();
 }
 
 export async function POST(request: Request) {

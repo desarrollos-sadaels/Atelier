@@ -4,7 +4,7 @@ import { parseNotificationSettings } from "@/lib/notifications";
 import { resolveRecipients } from "@/lib/notify";
 import { isEmailConfigured, sendEmail, emailShell, escapeHtml } from "@/lib/email";
 import { saleNet } from "@/lib/sales";
-import { isVercelDeployment } from "@/lib/env";
+import { allowsInsecureLocalFallback } from "@/lib/env";
 import { hasValidSecret } from "@/lib/secrets";
 
 export const runtime = "nodejs";
@@ -25,8 +25,8 @@ function authorized(request: Request): boolean {
   const syncSecret = process.env.SYNC_SECRET;
   if (hasValidSecret(request, syncSecret, { allowHeader: false })) return true;
 
-  // Sin ningún secreto configurado, solo se permite en local.
-  if (!cronSecret && !syncSecret) return !isVercelDeployment();
+  // Sin ningún secreto configurado, solo se permite en `next dev`.
+  if (!cronSecret && !syncSecret) return allowsInsecureLocalFallback();
   return false;
 }
 
