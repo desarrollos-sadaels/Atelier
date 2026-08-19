@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Chip, Dot, Eyebrow, btnCls } from "@/components/ui";
 import { Plus } from "@/components/icons";
-import { getDashboardStats, getRecentActivity, getTodaySales, getCurrentProfile, formatARS } from "@/lib/queries";
+import { getDashboardStats, getRecentActivity, getTodaySales, getCurrentProfile, firstNameOf, formatARS } from "@/lib/queries";
 import { cn } from "@/lib/cn";
 
 export default async function DashboardPage() {
@@ -12,7 +12,7 @@ export default async function DashboardPage() {
     getTodaySales(),
     getCurrentProfile(),
   ]);
-  const firstName = (profile?.name ?? "Luz").split(" ")[0];
+  const firstName = firstNameOf(profile?.name);
   const todayKicker = new Intl.DateTimeFormat("es-AR", {
     weekday: "long",
     day: "numeric",
@@ -37,9 +37,13 @@ export default async function DashboardPage() {
       <PageHeader
         kicker={`${todayKicker} · Buenos Aires`}
         title={
-          <>
-            Buenos días, <span className="italic">{firstName}</span>
-          </>
+          firstName ? (
+            <>
+              Buenos días, <span className="italic">{firstName}</span>
+            </>
+          ) : (
+            "Buenos días"
+          )
         }
         actions={
           <>
