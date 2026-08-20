@@ -1,3 +1,5 @@
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+
 /**
  * Modelo de roles de Atelier.
  * - admin: ve todo.
@@ -30,6 +32,23 @@ const ROLE_ROUTES: Record<Role, string[]> = {
 
 export function normalizeRole(raw: string | null | undefined): Role {
   return raw === "admin" || raw === "medios" || raw === "vendedor" ? raw : "vendedor";
+}
+
+/**
+ * Rol para decisiones de UI cuando no hay perfil. Son dos casos distintos que
+ * antes se confundían en un `?? "admin"`:
+ *
+ * - Sin Supabase configurado es modo demo (datos mock, no hay a quién
+ *   consultarle el rol): la UI se muestra completa, que es el punto de la demo.
+ * - Con backend, un perfil ausente es una sesión que no resolvió. Ahí hay que
+ *   fallar CERRADO, igual que `normalizeRole`, y no regalar la vista de admin.
+ *
+ * Es solo cosmético — todas las APIs revalidan el rol server-side — pero el
+ * default no debería apuntar al lado permisivo.
+ */
+export function uiRole(role: Role | null | undefined): Role {
+  if (role) return role;
+  return isSupabaseConfigured() ? "vendedor" : "admin";
 }
 
 /** ¿Puede este rol acceder a esta ruta de la app? */

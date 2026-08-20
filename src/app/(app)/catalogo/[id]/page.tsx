@@ -6,6 +6,7 @@ import { ProductShowcase } from "./ProductShowcase";
 import { StockPanel } from "./StockPanel";
 import { CampaignLinkCard } from "./CampaignLinkCard";
 import { getProductById, getCurrentProfile, getProductCampaignLink, formatARS } from "@/lib/queries";
+import { uiRole } from "@/lib/roles";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { getProductVariants, type ProductVariants } from "@/lib/shopify/inventory";
 import { isMetaConfigured } from "@/lib/meta/client";
@@ -24,7 +25,7 @@ export default async function ProductDetailPage({
     getProductCampaignLink(id),
   ]);
   if (!p) notFound();
-  const canManage = !profile || profile.role === "admin";
+  const canManage = uiRole(profile?.role) === "admin";
 
   const metaConfigured = isMetaConfigured();
   const [availableCampaigns, demo] = await Promise.all([

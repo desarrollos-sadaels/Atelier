@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { shopifyAdmin, isShopifyConfigured } from "@/lib/shopify/client";
-import { isVercelDeployment } from "@/lib/env";
+import { allowsInsecureLocalFallback } from "@/lib/env";
+import { hasValidSecret } from "@/lib/secrets";
 
 const TOPICS = [
   "orders/create",
@@ -12,12 +13,11 @@ const TOPICS = [
 function authorized(request: Request): boolean {
   const secret = process.env.SYNC_SECRET;
   if (secret) {
-    const auth = request.headers.get("authorization");
-    return auth === `Bearer ${secret}` || request.headers.get("x-sync-secret") === secret;
+    return hasValidSecret(request, secret);
   }
-  // Sin SYNC_SECRET solo se permite en local (mismo criterio que /api/shopify/sync):
-  // este endpoint reescribe los webhooks registrados en la tienda.
-  return !isVercelDeployment();
+  // Sin SYNC_SECRET solo se permite en `next dev` (mismo criterio que
+  // /api/shopify/sync): este endpoint reescribe los webhooks de la tienda.
+  return allowsInsecureLocalFallback();
 }
 
 export async function POST(request: Request) {

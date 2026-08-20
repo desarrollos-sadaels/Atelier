@@ -12,3 +12,20 @@ export function isVercelDeployment(): boolean {
   const env = process.env.VERCEL_ENV;
   return env === "production" || env === "preview";
 }
+
+/**
+ * ¿Este proceso puede relajar un chequeo de seguridad por falta de secreto?
+ *
+ * Solo `next dev`. Antes los endpoints de máquina preguntaban por
+ * `!isVercelDeployment()`, así que la garantía dependía del hosting: un
+ * `next start` en self-host, Docker o una VM, sin `SYNC_SECRET`/`CRON_SECRET`
+ * seteados, dejaba abiertos el sync del catálogo, el registro de webhooks, el
+ * resumen diario y el health con service_role.
+ *
+ * Ahora exige las dos cosas: no ser un deploy de Vercel Y no ser un build de
+ * producción. Cualquier `next build` queda fail-closed corra donde corra, y el
+ * único modo de habilitar esos endpoints ahí es configurarles el secreto.
+ */
+export function allowsInsecureLocalFallback(): boolean {
+  return !isVercelDeployment() && process.env.NODE_ENV !== "production";
+}

@@ -33,8 +33,29 @@ export async function PATCH(
   }
 
   const supaAdmin = createAdminClient();
-  const { error } = await supaAdmin.from("sales").update(patch).eq("id", id);
+  // Este handler escribe con service_role, así que la RLS de `sales` (UPDATE
+  // solo admin) queda bypasseada y el chequeo de pertenencia hay que hacerlo
+  // acá. Sin esto, cualquier vendedor podía togglear entregado/factura de una
+  // venta ajena mandando el id. El admin sigue pudiendo tocar todas.
+  let q = supaAdmin.from("sales").update(patch).eq("id", id);
+  if (auth.identity.role === "vendedor") {
+    if (!auth.identity.userId) {
+      return NextResponse.json({ ok: false, error: "No autenticado" }, { status: 401 });
+    }
+    // `.eq` también descarta las ventas con seller_id null (cargadas antes de
+    // que existiera la columna): esas quedan solo para admin.
+    q = q.eq("seller_id", auth.identity.userId);
+  }
+
+  const { data: updated, error } = await q.select("id");
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (!updated?.length) {
+    // No distinguimos "no existe" de "es de otro" para no confirmar ids ajenos.
+    return NextResponse.json(
+      { ok: false, error: "Venta inexistente o de otro vendedor" },
+      { status: 404 },
+    );
+  }
   return NextResponse.json({ ok: true, id });
 }
 

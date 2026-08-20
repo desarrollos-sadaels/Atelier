@@ -1,7 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { parseNotificationSettings, type NotificationSettings } from "@/lib/notifications";
-import { isEmailConfigured, sendEmail, emailShell } from "@/lib/email";
+import { isEmailConfigured, sendEmail, emailShell, escapeHtml } from "@/lib/email";
 
 type Supa = ReturnType<typeof createAdminClient>;
 
@@ -74,7 +74,7 @@ export async function notifyLowStock(supa: Supa, input: LowStockInput): Promise<
         await sendEmail({
           to: recipients,
           subject: `Atelier · ${title}: ${name}`,
-          html: emailShell(title, `<p style="font-size:14px;line-height:1.5">${body}</p>`),
+          html: emailShell(title, `<p style="font-size:14px;line-height:1.5">${escapeHtml(body)}</p>`),
         });
       }
     }
@@ -124,7 +124,7 @@ async function notifyCampaignOutOfStock(
     await sendEmail({
       to: recipients,
       subject: `Atelier · ${title}: ${name}`,
-      html: emailShell(title, `<p style="font-size:14px;line-height:1.5">${body}</p>`),
+      html: emailShell(title, `<p style="font-size:14px;line-height:1.5">${escapeHtml(body)}</p>`),
     });
   } catch (e) {
     console.error("[notify] email meta fallo:", e);

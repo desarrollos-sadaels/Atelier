@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { parseNotificationSettings } from "@/lib/notifications";
 import { resolveRecipients } from "@/lib/notify";
-import { isEmailConfigured, sendEmail, emailShell } from "@/lib/email";
+import { isEmailConfigured, sendEmail, emailShell, escapeHtml } from "@/lib/email";
 import { saleNet } from "@/lib/sales";
-import { isVercelDeployment } from "@/lib/env";
+import { allowsInsecureLocalFallback } from "@/lib/env";
+import { hasValidSecret } from "@/lib/secrets";
 
 export const runtime = "nodejs";
 
@@ -17,16 +18,15 @@ export const runtime = "nodejs";
  * header `Authorization: Bearer <CRON_SECRET>` a las llamadas del cron.
  */
 function authorized(request: Request): boolean {
-  const auth = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && auth === `Bearer ${cronSecret}`) return true;
+  if (hasValidSecret(request, cronSecret, { allowHeader: false })) return true;
 
   // SYNC_SECRET queda para dispararlo a mano desde una terminal.
   const syncSecret = process.env.SYNC_SECRET;
-  if (syncSecret && auth === `Bearer ${syncSecret}`) return true;
+  if (hasValidSecret(request, syncSecret, { allowHeader: false })) return true;
 
-  // Sin ningún secreto configurado, solo se permite en local.
-  if (!cronSecret && !syncSecret) return !isVercelDeployment();
+  // Sin ningún secreto configurado, solo se permite en `next dev`.
+  if (!cronSecret && !syncSecret) return allowsInsecureLocalFallback();
   return false;
 }
 
@@ -83,7 +83,7 @@ async function buildAndSend() {
       ? lowStock
           .map(
             (p) =>
-              `<tr><td style="padding:4px 8px">${p.name}</td><td style="padding:4px 8px;color:#888">${p.sku ?? "—"}</td><td style="padding:4px 8px;text-align:right;font-weight:600;${p.stock === 0 ? "color:#c00" : ""}">${p.stock}u</td></tr>`,
+              `<tr><td style="padding:4px 8px">${escapeHtml(p.name)}</td><td style="padding:4px 8px;color:#888">${escapeHtml(p.sku ?? "—")}</td><td style="padding:4px 8px;text-align:right;font-weight:600;${p.stock === 0 ? "color:#c00" : ""}">${p.stock}u</td></tr>`,
           )
           .join("")
       : `<tr><td colspan="3" style="padding:8px;color:#888">Sin productos bajo umbral 🎉</td></tr>`;

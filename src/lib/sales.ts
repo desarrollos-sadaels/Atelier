@@ -18,3 +18,25 @@ export type SaleAmount = {
 export function saleNet(sale: SaleAmount): number {
   return Number(sale.price) * (1 - Number(sale.discount)) * sale.qty;
 }
+
+/**
+ * Forma exacta que produce el uploader de facturas: `<uuid>.<ext>`, en la raíz
+ * del bucket (ver `uploadInvoice` en NuevaVentaClient).
+ */
+const INVOICE_PATH_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{1,8}$/i;
+
+/**
+ * ¿Es un path de factura que pudo haber generado la app?
+ *
+ * El path llega desde el cliente al registrar la venta y después
+ * `/api/ventas/[id]/factura` lo firma con la service_role — y una signed URL
+ * ignora las RLS. Hoy eso no agrega acceso (la policy `invoices_auth_read` ya
+ * deja leer el bucket entero a cualquier autenticado), pero sin validar, el día
+ * que esa policy se acote —facturas por vendedor, por ejemplo— el endpoint
+ * pasaría a ser una lectura de cualquier objeto del bucket. Validar acá evita
+ * que el agujero aparezca solo.
+ */
+export function isValidInvoicePath(path: string | null | undefined): boolean {
+  return typeof path === "string" && INVOICE_PATH_RE.test(path);
+}

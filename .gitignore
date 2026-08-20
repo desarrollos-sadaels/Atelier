@@ -49,3 +49,6 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# Supabase CLI (scratch local, no versionar)
+supabase/.temp/

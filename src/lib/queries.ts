@@ -126,6 +126,20 @@ export type CurrentProfile = {
   role: Role;
 };
 
+/**
+ * Nombre que manda el proveedor OAuth. `profiles.full_name` es una foto sacada
+ * por el trigger `handle_new_user` en el primer login y nadie la refresca, así
+ * que cuando quedó vacía (perfil creado a mano, o sin el claim en su momento)
+ * esto es lo más cercano al nombre real que tenemos.
+ */
+function metadataName(meta: Record<string, unknown> | undefined): string | null {
+  for (const key of ["full_name", "name"]) {
+    const value = meta?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
 /** Perfil del usuario logueado (null en modo demo / sin sesión). */
 export async function getCurrentProfile(): Promise<CurrentProfile | null> {
   if (!isSupabaseConfigured()) return null;
@@ -142,9 +156,24 @@ export async function getCurrentProfile(): Promise<CurrentProfile | null> {
   return {
     id: user.id,
     email: data?.email ?? user.email ?? "",
-    name: data?.full_name ?? user.email ?? "Usuario",
+    name: data?.full_name?.trim() || metadataName(user.user_metadata) || user.email || "Usuario",
     role: normalizeRole(data?.role),
   };
+}
+
+/**
+ * Primer nombre para el saludo. Devuelve null si no hay nada que mostrar, para
+ * que el saludo se arme sin nombre en vez de inventar uno.
+ */
+export function firstNameOf(name: string | null | undefined): string | null {
+  const value = name?.trim();
+  if (!value) return null;
+  if (value.includes("@")) {
+    // Sólo tenemos el mail: la parte antes del @, cortada en el primer separador.
+    const local = value.split("@")[0].split(/[._-]+/).filter(Boolean)[0];
+    return local ? local[0].toUpperCase() + local.slice(1) : null;
+  }
+  return value.split(/\s+/)[0] ?? null;
 }
 
 // ---------- ventas ----------

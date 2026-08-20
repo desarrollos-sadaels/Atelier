@@ -48,21 +48,28 @@ export function isSupabaseConfigured(): boolean {
 /**
  * Enforcement de auth real (middleware protege rutas, login usa Google).
  *
- * En cualquier deploy de Vercel (production o preview) la auth es OBLIGATORIA:
- * el flag no puede apagarla. Antes, si `NEXT_PUBLIC_AUTH_ENABLED` faltaba o
- * tenía un typo, el middleware dejaba de proteger las rutas y `requireRole()`
- * devolvía identidad admin a cualquier request anónima — un error de tipeo en
- * una env var abría la app entera contra datos reales.
+ * Regla: si hay Supabase configurado, la auth está PRENDIDA salvo que alguien
+ * la apague a propósito. El default invertido es el punto — antes, fuera de
+ * Vercel había que poner el flag en "true" para tener auth, así que una var
+ * ausente o con un typo dejaba el middleware sin proteger nada y `requireRole()`
+ * devolviendo identidad admin a cualquier request anónima. Un `next start` en
+ * self-host, Docker o una VM abría la app entera contra datos reales.
  *
- * El flag sigue existiendo solo para desarrollo local, donde permite cablear
- * la DB sin configurar el provider de Google + el dominio permitido.
+ * Dos capas:
  *
- * SOLO SERVER: `VERCEL_ENV` no está en el bundle del browser, así que en el
- * cliente esta función no puede distinguir producción de local. Para decidir
- * algo en un client component usá `isSupabaseConfigured()`.
+ * 1. En un deploy de Vercel (production o preview) la auth es innegociable: el
+ *    flag ni se lee. Preview apunta a la misma base que production, así que
+ *    cuenta como production a estos efectos.
+ * 2. Fuera de Vercel el default también es prendida. Apagarla exige el opt-out
+ *    explícito `NEXT_PUBLIC_AUTH_ENABLED=false`, pensado para ver una build
+ *    local (`next build && next start`) sin tener que loguearse. Ausente,
+ *    vacía o mal escrita ⇒ auth prendida.
+ *
+ * Queda un residuo asumido: un deploy fuera de Vercel que setee el flag en
+ * "false" a mano se queda sin auth. Es una acción deliberada, no un descuido.
  */
 export function isAuthEnabled(): boolean {
   if (!isSupabaseConfigured()) return false;
   if (isVercelDeployment()) return true;
-  return process.env.NEXT_PUBLIC_AUTH_ENABLED === "true";
+  return process.env.NEXT_PUBLIC_AUTH_ENABLED !== "false";
 }

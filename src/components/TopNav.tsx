@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { Popover } from "@/components/Popover";
 import { Search, Bell, Menu } from "@/components/icons";
 import { Dot } from "@/components/ui";
-import { navForRole, ROLE_LABEL, type Role } from "@/lib/roles";
+import { navForRole, uiRole, ROLE_LABEL, type Role } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import type { NotificationItem } from "@/lib/queries";
@@ -45,7 +45,7 @@ export function TopNav({
   const [notifs, setNotifs] = useState<NotificationItem[]>(initialNotifications);
   const [unread, setUnread] = useState(initialUnread);
 
-  const role: Role = profile?.role ?? "admin"; // modo demo (sin auth): nav completa
+  const role: Role = uiRole(profile?.role); // demo: nav completa; con backend, fail-closed
   const nav = navForRole(role);
 
   // Realtime: nuevas notificaciones aparecen sin recargar.
