@@ -47,7 +47,7 @@ export default async function LoginPage({
             >
               Tu atelier
               <br />
-              <span className="italic">de stock.</span>
+              <span className="italic">de stock. v2</span>
             </h1>
             <p
               className="u-rise mt-7 max-w-[420px] text-[15px] leading-relaxed text-ink2"
