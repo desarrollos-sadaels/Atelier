@@ -4,7 +4,11 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Google } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
-import { isSupabaseConfigured, ALLOWED_EMAIL_DOMAINS } from "@/lib/supabase/config";
+import {
+  isSupabaseConfigured,
+  ALLOWED_EMAIL_DOMAINS,
+  PUBLIC_APP_URL,
+} from "@/lib/supabase/config";
 
 export function GoogleButton() {
   const router = useRouter();
@@ -22,7 +26,9 @@ export function GoogleButton() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${location.origin}/auth/callback`,
+          // La cookie PKCE es host-only. Un origen canónico evita que el
+          // primer intento empiece en el dominio de Vercel y vuelva al propio.
+          redirectTo: `${PUBLIC_APP_URL || location.origin}/auth/callback`,
           // `hd` filtra el selector de Google a un único dominio Workspace;
           // solo lo aplicamos si hay exactamente un dominio permitido.
           queryParams:

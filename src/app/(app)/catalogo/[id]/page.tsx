@@ -101,7 +101,7 @@ export default async function ProductDetailPage({
           hasColor={hasColor}
           hasSize={hasSize}
           alertThreshold={p.alert_threshold}
-          fallbackTotal={p.stock}
+          initialTotal={pv?.total ?? p.stock}
           readOnly={!canManage}
         />
 

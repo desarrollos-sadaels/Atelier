@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   if (!isAdminConfigured()) {
     return NextResponse.json({
       ok: false,
-      reason: "Falta SUPABASE_SERVICE_ROLE_KEY en el entorno",
+      reason: "Falta SUPABASE_SERVICE_ROLE_KEY o no es una clave service_role/secret valida",
     });
   }
   try {

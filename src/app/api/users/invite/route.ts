@@ -4,8 +4,6 @@ import { requireRole } from "@/lib/api-auth";
 import { ROLES, ROLE_LABEL, type Role } from "@/lib/roles";
 import { sendEmail, emailShell } from "@/lib/email";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://atelier-six-iota.vercel.app";
-
 /** Invitar un usuario por email (solo admin). Habilita su acceso + manda instrucciones. */
 export async function POST(req: NextRequest) {
   const auth = await requireRole(["admin"]);
@@ -28,6 +26,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Email inválido" }, { status: 400 });
   }
   const role: Role = ROLES.includes(body.role as Role) ? (body.role as Role) : "vendedor";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || new URL(req.url).origin).replace(/\/+$/, "");
 
   const supaAdmin = createAdminClient();
   const { error } = await supaAdmin
@@ -46,7 +45,7 @@ export async function POST(req: NextRequest) {
       "Acceso a Atelier",
       `<p style="font-size:14px;line-height:1.6">Te dieron acceso a <strong>Atelier</strong> (control de stock de Sadaels) con el rol <strong>${ROLE_LABEL[role]}</strong>.</p>
        <p style="font-size:14px;line-height:1.6">Ingresá con tu cuenta de Google en:<br/>
-       <a href="${APP_URL}/login" style="color:#c0392b">${APP_URL}/login</a></p>`,
+       <a href="${appUrl}/login" style="color:#c0392b">${appUrl}/login</a></p>`,
     ),
   });
 

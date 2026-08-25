@@ -17,7 +17,7 @@ export function StockPanel({
   hasColor,
   hasSize,
   alertThreshold,
-  fallbackTotal,
+  initialTotal,
   readOnly,
 }: {
   productId: string;
@@ -25,20 +25,16 @@ export function StockPanel({
   hasColor: boolean;
   hasSize: boolean;
   alertThreshold: number;
-  fallbackTotal: number;
+  initialTotal: number;
   readOnly?: boolean;
 }) {
   const router = useRouter();
   const [variants, setVariants] = useState<VariantStock[] | null>(initialVariants);
+  const [total, setTotal] = useState(initialTotal);
   const [rows, setRows] = useState<Row[]>([]);
   const [color, setColor] = useState<string | null>(null);
   const [size, setSize] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  const total = useMemo(
-    () => (variants ? variants.reduce((s, v) => s + v.available, 0) : fallbackTotal),
-    [variants, fallbackTotal],
-  );
 
   const colors = useMemo(() => {
     if (!variants || !hasColor) return [];
@@ -74,6 +70,9 @@ export function StockPanel({
     if (hasColor && !color) return toast.error("Elegí un color");
     if (hasSize && !size) return toast.error("Elegí un talle");
     const v = findVariant();
+    if (v && !v.tracked) {
+      return toast.error("Shopify no tiene seguimiento de inventario para esa variante");
+    }
     if (!v) return toast.error("Esa combinación no existe");
     if (rows.some((r) => r.variant.id === v.id)) return toast("Ya está en la lista");
     setRows((cur) => [...cur, { variant: v, qty: "1" }]);
@@ -103,6 +102,7 @@ export function StockPanel({
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Error ajustando inventario");
       setVariants(data.variants as VariantStock[]);
+      setTotal(data.total as number);
       setRows([]);
       toast.success("Inventario actualizado", { id: t, description: `${data.total}u en total` });
       router.refresh();

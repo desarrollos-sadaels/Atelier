@@ -1,4 +1,4 @@
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type SetAllCookies } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config";
 import { canAccess, normalizeRole, ROLE_HOME } from "@/lib/roles";
@@ -13,18 +13,29 @@ const PROTECTED = [
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
+  let pendingCookies: Parameters<SetAllCookies>[0] = [];
+  const pendingHeaders: Record<string, string> = {};
+
+  function withSession(target: NextResponse) {
+    pendingCookies.forEach(({ name, value, options }) =>
+      target.cookies.set(name, value, options),
+    );
+    Object.entries(pendingHeaders).forEach(([name, value]) =>
+      target.headers.set(name, value),
+    );
+    return target;
+  }
 
   const supabase = createServerClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
     cookies: {
       getAll() {
         return request.cookies.getAll();
       },
-      setAll(cookiesToSet) {
+      setAll(cookiesToSet, headers) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, value, options }) =>
-          response.cookies.set(name, value, options),
-        );
+        pendingCookies = [...pendingCookies, ...cookiesToSet];
+        Object.assign(pendingHeaders, headers);
+        response = withSession(NextResponse.next({ request }));
       },
     },
   });
@@ -40,7 +51,7 @@ export async function updateSession(request: NextRequest) {
   if (!user && isProtected) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    return NextResponse.redirect(url);
+    return withSession(NextResponse.redirect(url));
   }
 
   if (user && (isProtected || path === "/login")) {
@@ -56,13 +67,13 @@ export async function updateSession(request: NextRequest) {
     if (path === "/login") {
       const url = request.nextUrl.clone();
       url.pathname = home;
-      return NextResponse.redirect(url);
+      return withSession(NextResponse.redirect(url));
     }
 
     if (isProtected && !canAccess(role, path)) {
       const url = request.nextUrl.clone();
       url.pathname = home;
-      return NextResponse.redirect(url);
+      return withSession(NextResponse.redirect(url));
     }
   }
 

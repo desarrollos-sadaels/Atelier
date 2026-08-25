@@ -93,14 +93,18 @@ export async function DELETE(
       if (product?.shopify_id) {
         const pv = await getProductVariants(product.shopify_id);
         const variant = pv?.variants.find((v) => v.id === sale.variant_gid);
+        if (variant && !variant.tracked) {
+          throw new Error("La variante ya no controla inventario en Shopify");
+        }
         if (!variant) throw new Error("No se encontró la variante para reponer");
         await adjustInventory([{ inventoryItemId: variant.inventoryItemId, delta: sale.qty }]);
         const fresh = await getProductVariants(product.shopify_id);
         if (fresh) {
-          await supaAdmin
+          const { error: stockUpdateError } = await supaAdmin
             .from("products")
             .update({ stock: fresh.total, updated_at: new Date().toISOString() })
             .eq("id", product.id);
+          if (stockUpdateError) throw stockUpdateError;
         }
       }
     } catch (e) {

@@ -163,21 +163,28 @@ export async function POST(req: NextRequest) {
         // de ESTE producto antes de descontar, para no poder mover el stock de
         // otro producto mandando un id de otra parte.
         const known = await getProductVariants(product.shopify_id);
-        const belongsToProduct = known?.variants.some((v) => v.inventoryItemId === inventoryItemId) ?? false;
-        if (!belongsToProduct) {
+        const variant = known?.variants.find((v) => v.inventoryItemId === inventoryItemId);
+        if (!variant) {
           warning = "La venta se registró pero la variante indicada no pertenece a este producto: no se descontó stock.";
+        } else if (!variant.tracked) {
+          warning = "La venta se registró, pero Shopify no controla stock para esa variante.";
         } else {
           await adjustInventory([{ inventoryItemId, delta: -qty }]);
           stockDeducted = true;
-          await supaAdmin.from("sales").update({ stock_deducted: true }).eq("id", saleId);
+          const { error: saleUpdateError } = await supaAdmin
+            .from("sales")
+            .update({ stock_deducted: true })
+            .eq("id", saleId);
+          if (saleUpdateError) throw saleUpdateError;
 
           // Reflejar el total real en la DB (mismo patrón que el restock).
           const fresh = await getProductVariants(product.shopify_id);
           if (fresh) {
-            await supaAdmin
+            const { error: stockUpdateError } = await supaAdmin
               .from("products")
               .update({ stock: fresh.total, updated_at: new Date().toISOString() })
               .eq("id", product.id);
+            if (stockUpdateError) throw stockUpdateError;
             await notifyLowStock(supaAdmin, {
               productId: product.id,
               name: product.name,

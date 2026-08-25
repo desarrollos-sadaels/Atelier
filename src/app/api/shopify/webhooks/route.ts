@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { mapProduct } from "@/lib/shopify/sync";
 import { getProductIdByInventoryItem, getProductVariants } from "@/lib/shopify/inventory";
 import { notifyLowStock } from "@/lib/notify";
@@ -66,10 +66,11 @@ async function reconcileStock(
   if (!prod.shopify_id) return;
   const fresh = await getProductVariants(prod.shopify_id);
   if (!fresh) return;
-  await supa
+  const { error } = await supa
     .from("products")
     .update({ stock: fresh.total, updated_at: new Date().toISOString() })
     .eq("id", prod.id);
+  if (error) throw error;
 
   await notifyLowStock(supa, {
     productId: prod.id,
@@ -113,10 +114,13 @@ export async function POST(request: Request) {
     process.env.SHOPIFY_CLIENT_SECRET ||
     process.env.SHOPIFY_API_SECRET;
   if (!secret) return new NextResponse("Webhook no configurado", { status: 503 });
-
   const raw = await request.text();
   if (!verifyHmac(raw, request.headers.get("x-shopify-hmac-sha256"), secret)) {
     return new NextResponse("HMAC inválido", { status: 401 });
+  }
+
+  if (!isAdminConfigured()) {
+    return new NextResponse("SUPABASE_SERVICE_ROLE_KEY invalida", { status: 503 });
   }
 
   const topic = request.headers.get("x-shopify-topic") || "";
@@ -125,7 +129,10 @@ export async function POST(request: Request) {
 
   try {
     if (topic === "products/create" || topic === "products/update") {
-      await supa.from("products").upsert(mapProduct(payload), { onConflict: "shopify_id" });
+      const { error } = await supa
+        .from("products")
+        .upsert(mapProduct(payload), { onConflict: "shopify_id" });
+      if (error) throw error;
     } else if (topic === "orders/create") {
       await handleOrder(payload, supa);
     } else if (topic === "inventory_levels/update") {

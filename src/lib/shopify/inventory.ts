@@ -7,6 +7,7 @@ export type VariantStock = {
   size: string | null;
   sku: string | null;
   available: number;
+  tracked: boolean;
   inventoryItemId: string; // GID del inventory item
   imageUrl: string | null; // imagen específica de la variante (color)
 };
@@ -25,7 +26,7 @@ type VariantNode = {
   sku: string | null;
   inventoryQuantity: number | null;
   selectedOptions: { name: string; value: string }[];
-  inventoryItem: { id: string } | null;
+  inventoryItem: { id: string; tracked: boolean } | null;
   image: { url: string } | null;
 };
 
@@ -58,7 +59,7 @@ export async function getProductVariants(shopifyId: string): Promise<ProductVari
             sku
             inventoryQuantity
             selectedOptions { name value }
-            inventoryItem { id }
+            inventoryItem { id tracked }
             image { url }
           }
         }
@@ -84,7 +85,8 @@ export async function getProductVariants(shopifyId: string): Promise<ProductVari
         ? v.selectedOptions.find((o) => o.name === sizeOptionName)?.value ?? null
         : null,
       sku: v.sku || null,
-      available: v.inventoryQuantity ?? 0,
+      available: v.inventoryItem!.tracked ? (v.inventoryQuantity ?? 0) : 0,
+      tracked: v.inventoryItem!.tracked,
       inventoryItemId: v.inventoryItem!.id,
       imageUrl: v.image?.url ?? null,
     }));

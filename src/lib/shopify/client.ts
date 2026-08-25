@@ -1,4 +1,4 @@
-const API_VERSION = process.env.SHOPIFY_API_VERSION || "2025-01";
+const API_VERSION = process.env.SHOPIFY_API_VERSION || "2026-07";
 
 export function isShopifyConfigured(): boolean {
   return Boolean(

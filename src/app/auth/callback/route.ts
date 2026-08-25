@@ -1,19 +1,43 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
-import { hasAccessRestriction, isEmailAllowed } from "@/lib/supabase/config";
+import {
+  hasAccessRestriction,
+  isEmailAllowed,
+  PUBLIC_APP_URL,
+} from "@/lib/supabase/config";
 import { normalizeRole, ROLE_HOME, type Role } from "@/lib/roles";
 
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+  const requestUrl = new URL(request.url);
+  const { searchParams } = requestUrl;
+  const redirectBase =
+    process.env.VERCEL_ENV === "production" && PUBLIC_APP_URL
+      ? new URL(PUBLIC_APP_URL)
+      : requestUrl;
   const code = searchParams.get("code");
   const rawNext = searchParams.get("next");
   // Solo rutas relativas propias: `//evil.com` o `https://evil.com` resuelven
   // a otro host si se concatenan directo en el redirect.
   const next = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : null;
 
+  // Reusar una única respuesta garantiza que las cookies escritas durante el
+  // intercambio OAuth lleguen en el mismo redirect que recibe el navegador.
+  const response = NextResponse.redirect(new URL("/login?error=auth", redirectBase));
+  response.headers.set(
+    "Cache-Control",
+    "private, no-cache, no-store, must-revalidate, max-age=0",
+  );
+  response.headers.set("Expires", "0");
+  response.headers.set("Pragma", "no-cache");
+
+  function redirectTo(path: string) {
+    response.headers.set("Location", new URL(path, redirectBase).toString());
+    return response;
+  }
+
   if (code) {
-    const supabase = await createClient();
+    const supabase = await createClient(response);
     // `data.user` viene del propio intercambio de código contra el Auth server, o sea
     // ya está validado: el getUser() que había acá era un viaje de red extra en el
     // camino crítico del login.
@@ -55,12 +79,12 @@ export async function GET(request: Request) {
 
         if (!allowed) {
           await supabase.auth.signOut();
-          return NextResponse.redirect(`${origin}/login?error=domain`);
+          return redirectTo("/login?error=domain");
         }
       }
 
       // Landing según rol (salvo que venga un `next` explícito).
-      if (next) return NextResponse.redirect(`${origin}${next}`);
+      if (next) return redirectTo(next);
       if (!role) {
         const { data: profile } = await supabase
           .from("profiles")
@@ -69,9 +93,9 @@ export async function GET(request: Request) {
           .maybeSingle();
         role = normalizeRole(profile?.role);
       }
-      return NextResponse.redirect(`${origin}${ROLE_HOME[role]}`);
+      return redirectTo(ROLE_HOME[role]);
     }
   }
 
-  return NextResponse.redirect(`${origin}/login?error=auth`);
+  return response;
 }

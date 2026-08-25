@@ -55,7 +55,9 @@ export async function POST(
   if (!known) {
     return NextResponse.json({ ok: false, error: "No se pudo leer el inventario desde Shopify" }, { status: 502 });
   }
-  const validIds = new Set(known.variants.map((v) => v.inventoryItemId));
+  const validIds = new Set(
+    known.variants.filter((variant) => variant.tracked).map((variant) => variant.inventoryItemId),
+  );
   if (changes.some((c) => !validIds.has(c.inventoryItemId))) {
     return NextResponse.json(
       { ok: false, error: "Una de las variantes no pertenece a este producto" },
@@ -67,11 +69,13 @@ export async function POST(
     await adjustInventory(changes);
     // Releer el estado real desde Shopify y reflejarlo en la DB.
     const fresh = await getProductVariants(product.shopify_id);
-    const total = fresh?.total ?? 0;
-    await supaAdmin
+    if (!fresh) throw new Error("El producto ya no existe en Shopify");
+    const total = fresh.total;
+    const { error: updateError } = await supaAdmin
       .from("products")
       .update({ stock: total, updated_at: new Date().toISOString() })
       .eq("id", product.id);
+    if (updateError) throw updateError;
 
     await notifyLowStock(supaAdmin, {
       productId: product.id,
@@ -80,7 +84,7 @@ export async function POST(
       alertThreshold: product.alert_threshold,
     });
 
-    return NextResponse.json({ ok: true, total, variants: fresh?.variants ?? [] });
+    return NextResponse.json({ ok: true, total, variants: fresh.variants });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error ajustando inventario";
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });

@@ -6,6 +6,7 @@ type ShopifyVariant = {
   sku?: string | null;
   price?: string | null;
   inventory_quantity?: number;
+  inventory_management?: string | null;
   barcode?: string | null;
 };
 type ShopifyImage = { src?: string | null };
@@ -22,9 +23,15 @@ type ShopifyProduct = {
 
 export function mapProduct(p: ShopifyProduct): TablesInsert<"products"> {
   const variants = p.variants ?? [];
-  // Stock = suma del inventario de TODAS las variantes (talles/colores).
+  // Shopify conserva a veces un inventory_quantity residual aun cuando una
+  // variante ya no trackea inventario. Product.totalInventory no lo cuenta y
+  // Atelier tampoco debe hacerlo.
   const stock = variants.reduce(
-    (sum, v) => sum + (typeof v.inventory_quantity === "number" ? v.inventory_quantity : 0),
+    (sum, v) =>
+      sum +
+      (v.inventory_management && typeof v.inventory_quantity === "number"
+        ? v.inventory_quantity
+        : 0),
     0,
   );
   // Primer valor no vacío entre variantes (la 1ª suele venir vacía).
