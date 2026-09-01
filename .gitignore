@@ -52,3 +52,6 @@ next-env.d.ts
 
 # Supabase CLI (scratch local, no versionar)
 supabase/.temp/
+
+# MCP local (contiene tokens en claro — NUNCA versionar)
+.mcp.json
