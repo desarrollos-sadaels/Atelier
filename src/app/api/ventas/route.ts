@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { isShopifyConfigured } from "@/lib/shopify/client";
-import { adjustInventory, getProductVariants } from "@/lib/shopify/inventory";
+import { adjustInventory, getProductVariants, type VariantStock } from "@/lib/shopify/inventory";
 import { requireRole } from "@/lib/api-auth";
-import { notifyLowStock } from "@/lib/notify";
+import { notifyLowStock, notifyStockDeductionUnmarked } from "@/lib/notify";
 import { isValidInvoicePath } from "@/lib/sales";
 import type { TablesInsert } from "@/lib/supabase/types";
 
@@ -11,6 +11,37 @@ function str(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const t = v.trim();
   return t || null;
+}
+
+/** GID de variante con la forma que emite Shopify, o null. */
+function variantGid(v: unknown): string | null {
+  const s = str(v);
+  return s && /^gid:\/\/shopify\/ProductVariant\/\d+$/.test(s) ? s : null;
+}
+
+/**
+ * Deja la venta marcada como "ya descontó stock", y de paso fija el
+ * `variant_gid` que se validó contra Shopify.
+ *
+ * Se reintenta porque este write es el que sostiene la reposición: si se
+ * pierde, `DELETE /api/ventas/[id]` no repone (mira ese flag) y el stock
+ * descontado no vuelve nunca. Es un update chico contra la misma base en la que
+ * el INSERT acaba de funcionar, así que un fallo acá es casi siempre transitorio.
+ */
+async function markStockDeducted(
+  supa: ReturnType<typeof createAdminClient>,
+  saleId: string,
+  validatedVariantGid: string,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { error } = await supa
+      .from("sales")
+      .update({ stock_deducted: true, variant_gid: validatedVariantGid })
+      .eq("id", saleId);
+    if (!error) return true;
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+  }
+  return false;
 }
 
 /** Registrar una venta. Si viene variante de Shopify, descuenta stock. */
@@ -71,7 +102,11 @@ export async function POST(req: NextRequest) {
     customer_contact: str(customer.contact),
     customer_address: str(customer.address),
     product_id: productId,
-    variant_gid: !isOtherBrand ? str(body.variantGid) : null,
+    // Provisorio: lo manda el cliente sin validar. Si el descuento de stock
+    // llega a concretarse, la fase 3 lo pisa con el GID de la variante que se
+    // verificó contra Shopify. Acá solo se filtra por forma, para no guardar
+    // texto arbitrario en un campo por el que después se busca.
+    variant_gid: !isOtherBrand ? variantGid(body.variantGid) : null,
     article,
     color: str(body.color),
     talle: str(body.talle),
@@ -146,6 +181,13 @@ export async function POST(req: NextRequest) {
   const saleId = inserted.id;
 
   // 3) Descontar stock en Shopify si corresponde (venta de catálogo con variante).
+  //
+  // El orden de las tres fases no es cosmético: `adjustInventory` es la línea
+  // que divide "el stock no se movió" de "el stock ya se movió", y cada lado
+  // necesita un manejo de error distinto. Antes las tres vivían en un solo
+  // `try`, así que un fallo POSTERIOR al descuento se reportaba como si el
+  // descuento hubiera fallado — y encima dejaba `stock_deducted` en false, con
+  // lo cual borrar esa venta no reponía nunca el stock (QA 2026-09-01).
   let stockDeducted = false;
   let warning: string | undefined;
   if (productId && inventoryItemId?.startsWith("gid://") && isShopifyConfigured()) {
@@ -158,33 +200,74 @@ export async function POST(req: NextRequest) {
     if (!product?.shopify_id) {
       warning = "La venta se registró pero el producto no tiene vínculo con Shopify: no se descontó stock.";
     } else {
+      // --- Fase 1: validar la variante. Todavía no se tocó nada. ---
+      // El inventoryItemId viene del cliente: verificar que sea una variante de
+      // ESTE producto antes de descontar, para no poder mover el stock de otro
+      // producto mandando un id de otra parte.
+      let variant: VariantStock | undefined;
       try {
-        // El inventoryItemId viene del cliente: verificar que sea una variante
-        // de ESTE producto antes de descontar, para no poder mover el stock de
-        // otro producto mandando un id de otra parte.
         const known = await getProductVariants(product.shopify_id);
-        const variant = known?.variants.find((v) => v.inventoryItemId === inventoryItemId);
-        if (!variant) {
-          warning = "La venta se registró pero la variante indicada no pertenece a este producto: no se descontó stock.";
-        } else if (!variant.tracked) {
-          warning = "La venta se registró, pero Shopify no controla stock para esa variante.";
-        } else {
-          await adjustInventory([{ inventoryItemId, delta: -qty }]);
-          stockDeducted = true;
-          const { error: saleUpdateError } = await supaAdmin
-            .from("sales")
-            .update({ stock_deducted: true })
-            .eq("id", saleId);
-          if (saleUpdateError) throw saleUpdateError;
+        variant = known?.variants.find((v) => v.inventoryItemId === inventoryItemId);
+      } catch (e) {
+        warning = `La venta se registró pero no se pudo leer el inventario en Shopify, así que no se descontó stock: ${
+          e instanceof Error ? e.message : "error desconocido"
+        }`;
+      }
 
-          // Reflejar el total real en la DB (mismo patrón que el restock).
+      if (!warning && !variant) {
+        warning = "La venta se registró pero la variante indicada no pertenece a este producto: no se descontó stock.";
+      } else if (!warning && variant && !variant.tracked) {
+        warning = "La venta se registró, pero Shopify no controla stock para esa variante.";
+      }
+
+      // --- Fase 2: el descuento. Único punto donde "no se descontó" es cierto. ---
+      if (!warning && variant) {
+        try {
+          await adjustInventory([{ inventoryItemId, delta: -qty }], {
+            // Atado a la venta: si esta request se reintenta y Shopify ya
+            // habia aplicado el descuento, no lo aplica dos veces.
+            idempotencyScope: `sale-deduct:${saleId}`,
+            reference: `gid://atelier/Sale/${saleId}`,
+          });
+          stockDeducted = true;
+        } catch (e) {
+          warning = `La venta se registró pero NO se pudo descontar stock en Shopify: ${
+            e instanceof Error ? e.message : "error desconocido"
+          }`;
+        }
+      }
+
+      // --- Fase 3: el stock YA se movió. Nada de acá lo puede desmentir. ---
+      if (stockDeducted && variant) {
+        // `stock_deducted` es lo que mira el DELETE para decidir si repone, así
+        // que este write es el que no se puede perder: se reintenta. De paso se
+        // fija el `variant_gid` autoritativo (el del cliente entró sin validar y
+        // es justamente el campo por el que el DELETE busca la variante).
+        const marked = await markStockDeducted(supaAdmin, saleId, variant.id);
+        if (!marked) {
+          warning =
+            `ATENCIÓN: el stock SÍ se descontó en Shopify, pero la venta ${saleId} no quedó marcada como descontada. ` +
+            "Si se elimina esta venta, el stock NO se va a reponer solo: corregirlo a mano en Shopify.";
+          // El toast se lo lleva el primer refresh; esto queda en la campanita.
+          await notifyStockDeductionUnmarked(supaAdmin, {
+            saleId,
+            productId: product.id,
+            article,
+            qty,
+          });
+        }
+
+        // Espejo local del total. Es cosmético y su fallo no cambia nada de lo
+        // anterior: `adjustInventory` dispara el webhook `inventory_levels/update`,
+        // que recalcula `products.stock` leyendo de Shopify. Por eso se ignora
+        // el error en vez de convertirlo en un warning que asuste al vendedor.
+        try {
           const fresh = await getProductVariants(product.shopify_id);
           if (fresh) {
-            const { error: stockUpdateError } = await supaAdmin
+            await supaAdmin
               .from("products")
               .update({ stock: fresh.total, updated_at: new Date().toISOString() })
               .eq("id", product.id);
-            if (stockUpdateError) throw stockUpdateError;
             await notifyLowStock(supaAdmin, {
               productId: product.id,
               name: product.name,
@@ -192,12 +275,9 @@ export async function POST(req: NextRequest) {
               alertThreshold: product.alert_threshold,
             });
           }
+        } catch {
+          // Silencio a propósito: lo reconcilia el webhook.
         }
-      } catch (e) {
-        // La venta ya quedó guardada: solo avisamos que el stock no se descontó.
-        warning = `La venta se registró pero NO se pudo descontar stock en Shopify: ${
-          e instanceof Error ? e.message : "error desconocido"
-        }`;
       }
     }
   }

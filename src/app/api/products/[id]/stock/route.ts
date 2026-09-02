@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { isShopifyConfigured } from "@/lib/shopify/client";
@@ -66,7 +67,13 @@ export async function POST(
   }
 
   try {
-    await adjustInventory(changes);
+    // Ajuste manual: no hay una operacion de negocio estable de la cual
+    // derivar la clave (dos correcciones iguales seguidas son legitimas y
+    // deben aplicarse las dos), asi que va una por request.
+    await adjustInventory(changes, {
+      idempotencyScope: `manual-adjust:${crypto.randomUUID()}`,
+      reference: `gid://atelier/StockAdjustment/${product.id}`,
+    });
     // Releer el estado real desde Shopify y reflejarlo en la DB.
     const fresh = await getProductVariants(product.shopify_id);
     if (!fresh) throw new Error("El producto ya no existe en Shopify");

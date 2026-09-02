@@ -1,4 +1,4 @@
-import { shopifyGraphql, getPrimaryLocationId } from "./client";
+import { shopifyGraphql, getFallbackLocationId } from "./client";
 
 export type OptionDef = { name: string; values: string[] };
 export type VariantDef = { optionValues: { name: string; value: string }[]; qty: number };
@@ -39,7 +39,9 @@ type ProductSetResult = {
 
 /** Crea un producto en Shopify (con opciones, variantes, inventario e imágenes) vía productSet. */
 export async function createShopifyProduct(input: NewProductInput): Promise<CreatedProduct> {
-  const locationId = await getPrimaryLocationId();
+  // Producto nuevo: todavia no tiene inventory levels de los que deducir la
+  // ubicacion, asi que se usa la unica location de la tienda.
+  const locationId = await getFallbackLocationId();
   const money = (n: number) => n.toFixed(2);
   const qty = (n: number) => Math.max(0, Math.trunc(n));
   const inv = (cost?: number | null) => ({

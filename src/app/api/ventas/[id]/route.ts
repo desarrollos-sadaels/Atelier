@@ -83,36 +83,76 @@ export async function DELETE(
   if (!sale) return NextResponse.json({ ok: false, error: "Venta no encontrada" }, { status: 404 });
 
   // Reponer stock si la venta lo había descontado.
+  //
+  // La reposición se "reserva" con un compare-and-swap sobre `stock_deducted`
+  // ANTES de tocar Shopify: solo la request que consigue bajar el flag repone.
+  // Sin eso, cualquier segundo intento volvía a reponer — y bastaba con que
+  // fallara el espejo de `products.stock` para que el endpoint devolviera 500
+  // con la venta todavía viva, invitando al admin a reintentar y sumar unidades
+  // fantasma (QA 2026-09-01). Si Shopify falla, el flag se restaura.
   if (sale.stock_deducted && sale.product_id && isShopifyConfigured()) {
-    try {
-      const { data: product } = await supaAdmin
-        .from("products")
-        .select("id, shopify_id")
-        .eq("id", sale.product_id)
-        .maybeSingle();
-      if (product?.shopify_id) {
-        const pv = await getProductVariants(product.shopify_id);
-        const variant = pv?.variants.find((v) => v.id === sale.variant_gid);
-        if (variant && !variant.tracked) {
-          throw new Error("La variante ya no controla inventario en Shopify");
-        }
-        if (!variant) throw new Error("No se encontró la variante para reponer");
-        await adjustInventory([{ inventoryItemId: variant.inventoryItemId, delta: sale.qty }]);
-        const fresh = await getProductVariants(product.shopify_id);
-        if (fresh) {
-          const { error: stockUpdateError } = await supaAdmin
-            .from("products")
-            .update({ stock: fresh.total, updated_at: new Date().toISOString() })
-            .eq("id", product.id);
-          if (stockUpdateError) throw stockUpdateError;
-        }
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Error reponiendo stock";
+    const { data: claimed, error: claimError } = await supaAdmin
+      .from("sales")
+      .update({ stock_deducted: false })
+      .eq("id", id)
+      .eq("stock_deducted", true)
+      .select("id");
+
+    if (claimError) {
       return NextResponse.json(
-        { ok: false, error: `No se eliminó la venta: ${msg}` },
+        { ok: false, error: `No se eliminó la venta: ${claimError.message}` },
         { status: 500 },
       );
+    }
+
+    // 0 filas = otra request ya se llevó la reposición. No es un error: seguimos
+    // al DELETE sin volver a tocar el inventario.
+    if (claimed?.length) {
+      try {
+        const { data: product } = await supaAdmin
+          .from("products")
+          .select("id, shopify_id")
+          .eq("id", sale.product_id)
+          .maybeSingle();
+        if (product?.shopify_id) {
+          const pv = await getProductVariants(product.shopify_id);
+          const variant = pv?.variants.find((v) => v.id === sale.variant_gid);
+          if (!variant) throw new Error("No se encontró la variante para reponer");
+          if (!variant.tracked) {
+            throw new Error("La variante ya no controla inventario en Shopify");
+          }
+          await adjustInventory([{ inventoryItemId: variant.inventoryItemId, delta: sale.qty }], {
+            // Scope distinto al del descuento: son dos movimientos opuestos de
+            // la misma venta y compartir clave haria que Shopify ignorara el
+            // segundo por "duplicado".
+            idempotencyScope: `sale-restock:${sale.id}`,
+            reference: `gid://atelier/SaleReversal/${sale.id}`,
+          });
+
+          // A partir de acá el stock YA volvió. El espejo local es cosmético
+          // —lo recalcula el webhook `inventory_levels/update`— así que su
+          // fallo no puede abortar la eliminación ni pedir un reintento.
+          try {
+            const fresh = await getProductVariants(product.shopify_id);
+            if (fresh) {
+              await supaAdmin
+                .from("products")
+                .update({ stock: fresh.total, updated_at: new Date().toISOString() })
+                .eq("id", product.id);
+            }
+          } catch {
+            // Silencio a propósito: lo reconcilia el webhook.
+          }
+        }
+      } catch (e) {
+        // No se repuso: devolver el flag a su lugar para que un reintento sí lo haga.
+        await supaAdmin.from("sales").update({ stock_deducted: true }).eq("id", id);
+        const msg = e instanceof Error ? e.message : "Error reponiendo stock";
+        return NextResponse.json(
+          { ok: false, error: `No se eliminó la venta: ${msg}` },
+          { status: 500 },
+        );
+      }
     }
   }
 

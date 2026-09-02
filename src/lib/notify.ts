@@ -33,6 +33,38 @@ async function resolveMediaRecipients(supa: Supa, explicit: string[]): Promise<s
   return emails.length ? emails : resolveRecipients(supa, []);
 }
 
+/**
+ * Deja constancia de una venta que descontó stock en Shopify pero no logró
+ * quedar marcada como tal en la base.
+ *
+ * Es el único estado del sistema que ninguna capa puede reparar sola: el
+ * inventario ya bajó, pero `sales.stock_deducted` quedó en false, así que si
+ * después se elimina la venta el stock NO se repone. El vendedor ve un warning
+ * en el toast, pero eso se lo lleva el primer refresh — de ahí la campanita,
+ * que sobrevive a la sesión y le llega a quien pueda corregirlo.
+ *
+ * Nunca lanza: se llama en un camino donde la venta ya está hecha y no puede
+ * fallar por un problema de notificación.
+ */
+export async function notifyStockDeductionUnmarked(
+  supa: Supa,
+  input: { saleId: string; productId: string; article: string; qty: number },
+): Promise<void> {
+  try {
+    await supa.from("notifications").insert({
+      type: "stock",
+      title: "Venta sin marcar: revisar stock a mano",
+      body:
+        `Se descontaron ${input.qty}u de "${input.article}" en Shopify, pero la venta ${input.saleId} ` +
+        "no quedó marcada como descontada. Si se elimina esa venta, el stock NO se va a reponer solo.",
+      product_id: input.productId,
+      severity: "alert",
+    });
+  } catch (e) {
+    console.error("[notify] no se pudo registrar la venta sin marcar:", e);
+  }
+}
+
 export type LowStockInput = {
   productId: string;
   name: string;

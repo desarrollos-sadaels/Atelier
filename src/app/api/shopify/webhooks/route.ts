@@ -135,10 +135,29 @@ export async function POST(request: Request) {
 
   try {
     if (topic === "products/create" || topic === "products/update") {
+      // `stock` se excluye a propósito del upsert.
+      //
+      // Un evento de PRODUCTO no es una fuente confiable de inventario: el
+      // payload del webhook no tiene por qué traer las cantidades igual que la
+      // REST API, y este handler compite con `inventory_levels/update` — que sí
+      // relee el stock real. Cuando ganaba esta carrera, `products.stock`
+      // quedaba con un número inventado (visto el 2026-09-02: un producto con 15
+      // unidades en Shopify quedó en 0 en Atelier). Omitir la columna la deja
+      // intacta en el UPDATE y en 0 (su default) en el INSERT; el valor de
+      // verdad lo pone `reconcileStock` acá abajo.
+      const withoutStock = { ...mapProduct(payload) };
+      delete (withoutStock as { stock?: number }).stock;
       const { error } = await supa
         .from("products")
-        .upsert(mapProduct(payload), { onConflict: "shopify_id" });
+        .upsert(withoutStock, { onConflict: "shopify_id" });
       if (error) throw error;
+
+      const { data: prod } = await supa
+        .from("products")
+        .select(PRODUCT_FIELDS)
+        .eq("shopify_id", withoutStock.shopify_id!)
+        .maybeSingle();
+      if (prod) await reconcileStock(supa, prod);
     } else if (topic === "orders/create") {
       await handleOrder(payload, supa);
     } else if (topic === "inventory_levels/update") {

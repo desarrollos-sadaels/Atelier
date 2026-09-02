@@ -89,16 +89,29 @@ export async function shopifyGraphql<T = unknown>(
 // Location de inventario (cacheada en memoria).
 let cachedLocation: string | null = null;
 
-/** Devuelve el GID de la location primaria (para asignar inventario). */
-export async function getPrimaryLocationId(): Promise<string> {
+/**
+ * Primera location de la tienda. Fallback, no la vía principal.
+ *
+ * OJO con los campos que se piden acá: `isPrimary`, `isActive` y `name`
+ * requieren el scope `read_locations`, que esta app NO tiene (tiene
+ * write_inventory, read_inventory, read_orders, read_products, write_products).
+ * Pedirlos hacía fallar la query entera con ACCESS_DENIED y, como
+ * `adjustInventory` la llamaba siempre, NINGUNA venta lograba descontar stock
+ * (descubierto probando el flujo real, QA 2026-09-02). `id` solo sí está
+ * permitido.
+ *
+ * Sin `isPrimary` no hay forma de saber cuál es la principal, así que esto sirve
+ * únicamente mientras haya una sola location — hoy es el caso. La vía correcta
+ * es `locationForInventoryItems()`, que deduce la ubicación del propio item.
+ */
+export async function getFallbackLocationId(): Promise<string> {
   if (cachedLocation) return cachedLocation;
-  const data = await shopifyGraphql<{
-    locations: { nodes: { id: string; isPrimary: boolean; isActive: boolean }[] };
-  }>(`{ locations(first: 10) { nodes { id isPrimary isActive } } }`);
-  const nodes = data.locations.nodes.filter((n) => n.isActive);
-  const primary = nodes.find((n) => n.isPrimary) ?? nodes[0];
-  if (!primary) throw new Error("Shopify: no hay location de inventario activa");
-  cachedLocation = primary.id;
+  const data = await shopifyGraphql<{ locations: { nodes: { id: string }[] } }>(
+    `{ locations(first: 1) { nodes { id } } }`,
+  );
+  const first = data.locations.nodes[0];
+  if (!first) throw new Error("Shopify: la tienda no tiene ninguna location");
+  cachedLocation = first.id;
   return cachedLocation;
 }
 
