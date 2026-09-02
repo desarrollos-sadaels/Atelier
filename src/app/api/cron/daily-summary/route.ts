@@ -3,7 +3,7 @@ import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { parseNotificationSettings } from "@/lib/notifications";
 import { resolveRecipients } from "@/lib/notify";
 import { isEmailConfigured, sendEmail, emailShell, escapeHtml } from "@/lib/email";
-import { saleNet } from "@/lib/sales";
+import { saleItemRevenue, saleItemNet } from "@/lib/sales";
 import { allowsInsecureLocalFallback } from "@/lib/env";
 import { hasValidSecret } from "@/lib/secrets";
 
@@ -59,11 +59,27 @@ async function buildAndSend() {
 
   const day = summaryDayART();
 
-  const { data: sales = [] } = await supa.from("sales").select("*").eq("sold_at", day);
+  // Una compra con sus prendas: la plata sale de las prendas, el conteo de
+  // operaciones de las compras. Antes eran la misma fila y por eso una compra
+  // de dos prendas contaba como dos ventas en el resumen de la noche.
+  const { data: sales = [] } = await supa
+    .from("sales")
+    .select("id, origin, delivered, sale_discount, sale_items(qty, price, discount, status, counts_revenue, exchange_adjustment)")
+    .eq("sold_at", day);
   const rows = sales ?? [];
-  const totalAmount = rows.reduce((acc, r) => acc + saleNet(r), 0);
-  const units = rows.reduce((acc, r) => acc + r.qty, 0);
-  const pendingDelivery = rows.filter((r) => !r.delivered).length;
+
+  const lines = rows.flatMap((s) =>
+    (s.sale_items ?? []).map((i) => ({ ...i, sale: s })),
+  );
+  const live = rows.filter((s) => (s.sale_items ?? []).some((i) => i.status === "active"));
+  const totalAmount = lines.reduce((acc, l) => acc + saleItemRevenue(l, l.sale.sale_discount), 0);
+  const shopifyAmount = lines
+    .filter((l) => l.sale.origin === "shopify")
+    .reduce((acc, l) => acc + saleItemRevenue(l, l.sale.sale_discount), 0);
+  const units = lines.reduce((acc, l) => (l.status === "active" ? acc + l.qty : acc), 0);
+  const pendingDelivery = live.filter((s) => !s.delivered).length;
+  const returned = lines.filter((l) => l.status === "returned");
+  const returnedAmount = returned.reduce((acc, l) => acc + saleItemNet(l, l.sale.sale_discount), 0);
 
   const { data: products = [] } = await supa
     .from("products")
@@ -91,8 +107,9 @@ async function buildAndSend() {
     const html = emailShell(
       `Resumen diario · ${day}`,
       `<div style="font-size:14px;line-height:1.6">
-        <p><strong>Ventas de hoy:</strong> ${rows.length} operaciones · ${units} unidades · ${ars.format(totalAmount)}<br/>
-        <strong>Entregas pendientes:</strong> ${pendingDelivery}</p>
+        <p><strong>Ventas de hoy:</strong> ${live.length} operaciones · ${units} unidades · ${ars.format(totalAmount)}<br/>
+        <strong>De la tienda online:</strong> ${ars.format(shopifyAmount)}<br/>
+        <strong>Entregas pendientes:</strong> ${pendingDelivery}${returned.length ? `<br/><strong>Devoluciones:</strong> ${returned.length} prendas · ${ars.format(returnedAmount)}` : ""}</p>
         <p style="font-weight:600;margin-top:16px">Stock bajo / sin stock</p>
         <table style="border-collapse:collapse;width:100%;font-size:13px;border-top:1px solid #eee">${lowRows}</table>
       </div>`,
@@ -104,9 +121,12 @@ async function buildAndSend() {
   return {
     ok: true,
     day,
-    sales: rows.length,
+    sales: live.length,
+    items: lines.length,
     units,
     totalAmount,
+    shopifyAmount,
+    returned: returned.length,
     lowStock: lowStock.length,
     emailSkipped: skipped,
     recipients: recipients.length,

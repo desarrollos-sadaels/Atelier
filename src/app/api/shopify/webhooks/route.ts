@@ -3,6 +3,12 @@ import crypto from "node:crypto";
 import { createAdminClient, adminConfigProblem } from "@/lib/supabase/admin";
 import { mapProduct } from "@/lib/shopify/sync";
 import { getProductIdByInventoryItem, getProductVariants } from "@/lib/shopify/inventory";
+import {
+  fetchOrder,
+  importOrder,
+  type MatchedProduct,
+  type ShopifyOrder,
+} from "@/lib/shopify/orders";
 import { notifyLowStock } from "@/lib/notify";
 
 export const runtime = "nodejs";
@@ -19,39 +25,7 @@ function verifyHmac(raw: string, header: string | null, secret: string): boolean
 
 type Supa = ReturnType<typeof createAdminClient>;
 
-type OrderLineItem = { sku?: string; quantity?: number; product_id?: number | string };
-
 const PRODUCT_FIELDS = "id,shopify_id,name,alert_threshold";
-
-/**
- * Ubica el producto de una línea de la orden.
- *
- * Matchea por `shopify_id`, que es el único identificador realmente único: la
- * migración 0002 le sacó a propósito el constraint de unicidad al SKU porque en
- * Shopify se repiten entre productos. Buscar por SKU con `.limit(1)` podía
- * descontarle stock a un producto distinto del que se vendió.
- */
-async function findProduct(li: OrderLineItem, supa: Supa) {
-  if (li.product_id != null) {
-    const { data } = await supa
-      .from("products")
-      .select(PRODUCT_FIELDS)
-      .eq("shopify_id", String(li.product_id))
-      .maybeSingle();
-    if (data) return data;
-  }
-  // Fallback por SKU, solo si identifica a un único producto: ante ambigüedad
-  // preferimos no tocar nada antes que descontarle al equivocado.
-  if (li.sku) {
-    const { data: rows } = await supa
-      .from("products")
-      .select(PRODUCT_FIELDS)
-      .eq("sku", li.sku)
-      .limit(2);
-    if (rows?.length === 1) return rows[0];
-  }
-  return null;
-}
 
 /**
  * Releer el stock real de un producto desde Shopify (fuente de verdad) y
@@ -59,10 +33,7 @@ async function findProduct(li: OrderLineItem, supa: Supa) {
  * el problema de descontar sobre un número cacheado, que se pisa si llegan dos
  * eventos concurrentes para el mismo producto.
  */
-async function reconcileStock(
-  supa: Supa,
-  prod: { id: string; shopify_id: string | null; name: string; alert_threshold: number | null },
-) {
+async function reconcileStock(supa: Supa, prod: MatchedProduct) {
   if (!prod.shopify_id) return;
   const fresh = await getProductVariants(prod.shopify_id);
   if (!fresh) return;
@@ -80,12 +51,20 @@ async function reconcileStock(
   });
 }
 
-async function handleOrder(order: { line_items?: OrderLineItem[] }, supa: Supa) {
-  const seen = new Set<string>();
-  for (const li of order.line_items ?? []) {
-    const prod = await findProduct(li, supa);
-    if (!prod || seen.has(prod.id)) continue;
-    seen.add(prod.id);
+/**
+ * Una orden de Shopify hace DOS cosas acá, y hasta la 0017 solo hacía la
+ * primera: reconciliar el stock de los productos que tocó. Faltaba la segunda —
+ * registrarla como venta — así que el listado de Ventas mostraba únicamente lo
+ * cargado a mano en el local, y la mitad online del negocio no existía para
+ * Atelier.
+ *
+ * El import va primero porque es lo que no se puede recuperar solo: si falla,
+ * el cron de `sync-orders` la levanta más tarde, pero conviene que el error se
+ * vea en la respuesta del webhook (Shopify reintenta).
+ */
+async function handleOrder(order: ShopifyOrder, supa: Supa) {
+  const { products } = await importOrder(order, supa);
+  for (const prod of products) {
     await reconcileStock(supa, prod);
   }
 }
@@ -106,6 +85,18 @@ async function handleInventoryLevel(
     .maybeSingle();
   if (!prod) return;
   await reconcileStock(supa, prod);
+}
+
+/**
+ * `refunds/create` trae el reembolso, no la orden. Se relee la orden completa
+ * para recalcular qué líneas quedaron devueltas: un reembolso parcial devuelve
+ * una prenda de tres, y sin el estado completo de la orden no hay forma de
+ * saber cuáles.
+ */
+async function handleRefund(payload: { order_id?: number | string }, supa: Supa) {
+  if (payload.order_id == null) return;
+  const order = await fetchOrder(payload.order_id);
+  if (order) await handleOrder(order, supa);
 }
 
 export async function POST(request: Request) {
@@ -158,8 +149,17 @@ export async function POST(request: Request) {
         .eq("shopify_id", withoutStock.shopify_id!)
         .maybeSingle();
       if (prod) await reconcileStock(supa, prod);
-    } else if (topic === "orders/create") {
+    } else if (
+      topic === "orders/create" ||
+      topic === "orders/updated" ||
+      topic === "orders/cancelled"
+    ) {
+      // Los tres traen la orden completa, así que el mismo handler sirve: el
+      // import es idempotente por `shopify_line_item_id` y `orders/cancelled`
+      // se distingue solo, por el `cancelled_at` del payload.
       await handleOrder(payload, supa);
+    } else if (topic === "refunds/create") {
+      await handleRefund(payload, supa);
     } else if (topic === "inventory_levels/update") {
       await handleInventoryLevel(payload, supa);
     }

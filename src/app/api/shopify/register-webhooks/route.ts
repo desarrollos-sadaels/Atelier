@@ -7,6 +7,14 @@ export const runtime = "nodejs";
 
 const TOPICS = [
   "orders/create",
+  // `updated` y `cancelled` mantienen al día el estado de una venta ya
+  // importada: el despacho la marca entregada, la cancelación la marca
+  // devuelta. Sin ellos una orden quedaba congelada en cómo estaba al entrar.
+  "orders/updated",
+  "orders/cancelled",
+  // Un reembolso parcial devuelve una prenda de tres; es el único evento que
+  // avisa de eso.
+  "refunds/create",
   "products/create",
   "products/update",
   "inventory_levels/update",

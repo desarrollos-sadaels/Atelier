@@ -2,14 +2,28 @@ import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Chip, Dot, Eyebrow, btnCls } from "@/components/ui";
 import { Plus } from "@/components/icons";
-import { getDashboardStats, getRecentActivity, getTodaySales, getCurrentProfile, firstNameOf, formatARS } from "@/lib/queries";
+import {
+  getDashboardStats,
+  getRecentActivity,
+  getTodaySales,
+  getSalesSeries,
+  getCurrentProfile,
+  firstNameOf,
+  formatARS,
+  lastDaysRangeART,
+} from "@/lib/queries";
+import { SalesChart } from "@/components/SalesChart";
 import { cn } from "@/lib/cn";
 
+const CHART_DAYS = 30;
+
 export default async function DashboardPage() {
-  const [stats, activity, todaySales, profile] = await Promise.all([
+  const chartRange = lastDaysRangeART(CHART_DAYS);
+  const [stats, activity, todaySales, series, profile] = await Promise.all([
     getDashboardStats(),
     getRecentActivity(),
     getTodaySales(),
+    getSalesSeries(chartRange.start, chartRange.end),
     getCurrentProfile(),
   ]);
   const firstName = firstNameOf(profile?.name);
@@ -27,7 +41,12 @@ export default async function DashboardPage() {
     {
       label: "Ventas hoy",
       value: todaySales.operations > 0 ? formatARS(todaySales.totalAmount) : "—",
-      sub: todaySales.operations > 0 ? `${todaySales.operations} operaciones` : "sin ventas todavía",
+      // Abrir el número por plataforma es el punto: el mismo KPI ahora suma el
+      // local y la tienda online, y sin el desglose no se sabe cuál movió.
+      sub:
+        todaySales.operations > 0
+          ? `${formatARS(todaySales.atelierAmount)} atelier · ${formatARS(todaySales.shopifyAmount)} online`
+          : "sin ventas todavía",
       alert: false,
     },
   ];
@@ -47,7 +66,7 @@ export default async function DashboardPage() {
         }
         actions={
           <>
-            <Link href="/compras/reporte" className={btnCls("ghost")}>
+            <Link href="/ventas/reporte" className={btnCls("ghost")}>
               Reporte de ventas
             </Link>
             <Link href="/catalogo/nuevo" className={btnCls("primary")}>
@@ -83,15 +102,8 @@ export default async function DashboardPage() {
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1.75fr_1fr]">
         {/* chart */}
         <Card className="p-6">
-          <Eyebrow>Ventas · últimos 30 días</Eyebrow>
-          <div className="mt-8 grid h-[180px] place-items-center rounded-[4px] border border-dashed border-line">
-            <div className="text-center">
-              <div className="font-serif text-[20px]">Sin datos de ventas aún</div>
-              <p className="mono mt-2 text-[11px] text-mut">
-                Se poblará con las ventas que lleguen por Shopify
-              </p>
-            </div>
-          </div>
+          <Eyebrow>Ventas · últimos {CHART_DAYS} días</Eyebrow>
+          <SalesChart data={series} />
         </Card>
 
         {/* alerts */}

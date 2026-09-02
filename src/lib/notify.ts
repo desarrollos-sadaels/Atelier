@@ -48,15 +48,15 @@ async function resolveMediaRecipients(supa: Supa, explicit: string[]): Promise<s
  */
 export async function notifyStockDeductionUnmarked(
   supa: Supa,
-  input: { saleId: string; productId: string; article: string; qty: number },
+  input: { itemId: string; productId: string; article: string; qty: number },
 ): Promise<void> {
   try {
     await supa.from("notifications").insert({
       type: "stock",
       title: "Venta sin marcar: revisar stock a mano",
       body:
-        `Se descontaron ${input.qty}u de "${input.article}" en Shopify, pero la venta ${input.saleId} ` +
-        "no quedó marcada como descontada. Si se elimina esa venta, el stock NO se va a reponer solo.",
+        `Se descontaron ${input.qty}u de "${input.article}" en Shopify, pero la prenda ${input.itemId} ` +
+        "no quedó marcada como descontada. Si se devuelve o elimina esa venta, el stock NO se va a reponer solo.",
       product_id: input.productId,
       severity: "alert",
     });

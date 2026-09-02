@@ -1,6 +1,7 @@
 {
   "crons": [
     { "path": "/api/shopify/sync", "schedule": "0 3 * * *" },
+    { "path": "/api/shopify/sync-orders?days=7", "schedule": "5 3 * * *" },
     { "path": "/api/cron/daily-summary", "schedule": "10 3 * * *" }
   ]
 }

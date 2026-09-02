@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -12,28 +11,14 @@ import { ColorSwatch } from "@/components/ColorSwatch";
 import { X } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
 import type { PaymentMethod } from "@/lib/payments";
-import { saleNet } from "@/lib/sales";
+import type { PickerProduct } from "@/lib/queries";
+import { saleItemNet, saleNet } from "@/lib/sales";
 import { cn } from "@/lib/cn";
+import { ProductPicker, type ChosenItem } from "../ProductPicker";
 
-export type PickerProduct = {
-  id: string;
-  name: string;
-  sku: string;
-  image: string | null;
-  price: number;
-  stock: number;
-};
+export type { PickerProduct } from "@/lib/queries";
 
-type Variant = {
-  id: string;
-  color: string | null;
-  size: string | null;
-  optionLabel: string;
-  available: number;
-  inventoryItemId: string;
-};
-
-const PUNTOS = ["LOCAL", "SHOPIFY", "CHAT", "FASHION X GLOBAL", "AMIGOS Y FAMILIA"];
+const PUNTOS = ["LOCAL", "SHOPIFY", "CHAT", "INSTAGRAM", "WHATSAPP", "FASHION X GLOBAL", "AMIGOS Y FAMILIA"];
 
 async function uploadInvoice(file: File): Promise<string> {
   const supabase = createClient();
@@ -57,6 +42,14 @@ function today(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/**
+ * Registrar una venta: UNA compra con las prendas que se lleve el cliente.
+ *
+ * Antes este formulario cargaba exactamente un producto, así que una compra de
+ * dos prendas había que registrarla como dos ventas — con el cliente, el medio
+ * de pago y la factura duplicados, y el ticket promedio del reporte a la mitad.
+ * Ahora la pantalla es un carrito: se agregan prendas y el pago es uno solo.
+ */
 export function NuevaVentaClient({
   products,
   sellerName,
@@ -69,30 +62,15 @@ export function NuevaVentaClient({
   const router = useRouter();
   const PAGOS = paymentMethods.map((m) => m.name);
 
-  // artículo
-  const [otherBrand, setOtherBrand] = useState(false);
-  const [search, setSearch] = useState("");
-  const [product, setProduct] = useState<PickerProduct | null>(null);
-  const [variants, setVariants] = useState<Variant[] | null>(null);
-  const [loadingVariants, setLoadingVariants] = useState(false);
-  const [color, setColor] = useState<string | null>(null);
-  const [talle, setTalle] = useState<string | null>(null);
-  const [genericLabel, setGenericLabel] = useState<string | null>(null);
-  // otra marca
-  const [brand, setBrand] = useState("");
-  const [freeArticle, setFreeArticle] = useState("");
-  const [freeColor, setFreeColor] = useState("");
-  const [freeTalle, setFreeTalle] = useState("");
+  const [items, setItems] = useState<ChosenItem[]>([]);
   // cliente
   const [custName, setCustName] = useState("");
   const [custDni, setCustDni] = useState("");
   const [custContact, setCustContact] = useState("");
   const [custAddress, setCustAddress] = useState("");
-  // venta
+  // pago
   const [soldAt, setSoldAt] = useState(today());
-  const [qty, setQty] = useState("1");
-  const [price, setPrice] = useState("");
-  const [discount, setDiscount] = useState("0");
+  const [saleDiscount, setSaleDiscount] = useState("0");
   const [pago, setPago] = useState(paymentMethods[0]?.name ?? "EFECTIVO");
   const [cuotas, setCuotas] = useState("");
   const [punto, setPunto] = useState("LOCAL");
@@ -101,6 +79,7 @@ export function NuevaVentaClient({
   const [delivered, setDelivered] = useState(true);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+
   // Se genera recién en el primer submit (no en render) para no depender de
   // `crypto` durante el SSR.
   const idempotencyKey = useRef<string | null>(null);
@@ -110,9 +89,9 @@ export function NuevaVentaClient({
   // exitoso, y la corrección se pierde en silencio).
   const lastSignature = useRef<string | null>(null);
   // Path de la factura ya subida para ESTE intento. Sin esto, un reintento con
-  // los mismos datos volvia a subir el archivo con un UUID nuevo y, como la
-  // clave de idempotencia no cambiaba, el server devolvia la venta original:
-  // el segundo archivo quedaba huerfano en el bucket.
+  // los mismos datos volvía a subir el archivo con un UUID nuevo y, como la
+  // clave de idempotencia no cambiaba, el server devolvía la venta original: el
+  // segundo archivo quedaba huérfano en el bucket.
   const uploadedInvoice = useRef<string | null>(null);
 
   const selectedMethod = paymentMethods.find((m) => m.name === pago) ?? null;
@@ -125,88 +104,29 @@ export function NuevaVentaClient({
     setCuotas(m?.installments?.length ? String(m.installments[0]) : "");
   }
 
-  const results = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (!needle) return [];
-    return products
-      .filter((p) => `${p.name} ${p.sku}`.toLowerCase().includes(needle))
-      .slice(0, 6);
-  }, [products, search]);
-
-  const colors = useMemo(
-    () => [...new Set((variants ?? []).map((v) => v.color).filter(Boolean))] as string[],
-    [variants],
+  const discountFraction = (Number(saleDiscount) || 0) / 100;
+  const subtotal = useMemo(() => items.reduce((s, it) => s + saleNet(it), 0), [items]);
+  const total = useMemo(
+    () => items.reduce((s, it) => s + saleItemNet(it, discountFraction), 0),
+    [items, discountFraction],
   );
-  const sizes = useMemo(() => {
-    const pool = (variants ?? []).filter((v) => (color ? v.color === color : true));
-    return [...new Set(pool.map((v) => v.size).filter(Boolean))] as string[];
-  }, [variants, color]);
-
-  // Cuando el producto tiene más de una variante pero ninguna se distingue por
-  // color/talle (opciones de Shopify con otro nombre, ej. "Modelo"), no hay
-  // forma segura de adivinar cuál se vendió: se ofrece un picker genérico por
-  // optionLabel en vez de descontarle stock a `variants[0]` a ciegas.
-  const isAmbiguous = (variants?.length ?? 0) > 1 && colors.length === 0 && sizes.length === 0;
-
-  const selectedVariant = useMemo(() => {
-    if (!variants) return null;
-    if (variants.length <= 1) return variants[0] ?? null;
-    if (isAmbiguous) return variants.find((v) => v.optionLabel === genericLabel) ?? null;
-    return (
-      variants.find(
-        (v) => (color ? v.color === color : true) && (talle ? v.size === talle : true),
-      ) ?? null
-    );
-  }, [variants, color, talle, isAmbiguous, genericLabel]);
-
-  const needsColor = colors.length > 0 && !color;
-  const needsTalle = sizes.length > 0 && !talle;
-  const needsGeneric = isAmbiguous && !genericLabel;
-
-  async function pickProduct(p: PickerProduct) {
-    setProduct(p);
-    setSearch("");
-    setColor(null);
-    setTalle(null);
-    setGenericLabel(null);
-    setVariants(null);
-    if (!price) setPrice(String(p.price || ""));
-    setLoadingVariants(true);
-    try {
-      const res = await fetch(`/api/products/${p.id}/variants`);
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "No se pudieron cargar las variantes");
-      setVariants(data.variants ?? []);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "No se pudieron cargar las variantes");
-      setVariants([]);
-    } finally {
-      setLoadingVariants(false);
-    }
-  }
+  const units = items.reduce((s, it) => s + it.qty, 0);
 
   async function submit() {
     if (saving) return;
-    const priceNum = Number(price);
-    const qtyNum = Math.trunc(Number(qty)) || 1;
-    const discountNum = (Number(discount) || 0) / 100;
+    if (!items.length) return toast.error("Agregá al menos una prenda");
+    if (discountFraction < 0 || discountFraction >= 1) {
+      return toast.error("Descuento general inválido (0–99%)");
+    }
 
-    if (!otherBrand && !product) return toast.error("Elegí un producto del catálogo");
-    if (otherBrand && !freeArticle.trim()) return toast.error("Ingresá el artículo");
-    if (!Number.isFinite(priceNum) || priceNum <= 0) return toast.error("Ingresá un precio válido");
-    if (discountNum < 0 || discountNum >= 1) return toast.error("Descuento inválido (0–99%)");
-    if (!otherBrand && (needsColor || needsTalle))
-      return toast.error("Elegí color y talle de la variante vendida");
-    if (!otherBrand && needsGeneric) return toast.error("Elegí la variante vendida");
-    let allowOversell = false;
-    if (!otherBrand && selectedVariant && selectedVariant.available < qtyNum) {
-      const ok = confirm(
-        `La variante tiene stock ${selectedVariant.available} y estás vendiendo ${qtyNum}. ¿Registrar igual?`,
-      );
-      if (!ok) return;
-      // El server revalida contra Shopify. Este flag le dice que el faltante ya
-      // se vio y se aceptó, para que no lo reporte como hallazgo.
-      allowOversell = true;
+    // El server revalida contra Shopify. Este flag le dice que el faltante ya
+    // se vio y se aceptó, para que no lo reporte como hallazgo.
+    const short = items.filter((it) => it.available !== null && it.available < it.qty);
+    if (short.length) {
+      const detail = short
+        .map((it) => `${it.article}: hay ${it.available}u y se venden ${it.qty}`)
+        .join("\n");
+      if (!window.confirm(`Stock insuficiente:\n${detail}\n\n¿Registrar la venta igual?`)) return;
     }
 
     setSaving(true);
@@ -215,16 +135,11 @@ export function NuevaVentaClient({
       // Clave de idempotencia: se genera una vez y se reusa en los reintentos
       // de ESTA venta. Si la request se duplica (doble tap, retry del browser,
       // respuesta perdida), el server devuelve la venta original en vez de
-      // registrarla de nuevo y descontar stock dos veces. Si los datos
-      // cambiaron desde el último intento (el usuario corrigió algo), se
-      // descarta la clave vieja: si no, el reintento "exitoso" devolvería la
-      // venta original con los datos viejos.
+      // registrarla de nuevo y descontar stock dos veces.
       const signature = JSON.stringify({
-        soldAt, qty: qtyNum, price: priceNum, discount: discountNum,
-        pago, cuotas, punto, invoiced, delivered, notes,
+        soldAt, saleDiscount, pago, cuotas, punto, invoiced, delivered, notes,
         custName, custDni, custContact, custAddress,
-        otherBrand, brand, freeArticle, freeColor, freeTalle,
-        productId: product?.id ?? null, color, talle, variantId: selectedVariant?.id ?? null,
+        items: items.map((it) => [it.article, it.qty, it.price, it.discount, it.variantGid]),
         invoiceFile: invoiceFile ? `${invoiceFile.name}:${invoiceFile.size}:${invoiceFile.lastModified}` : null,
       });
       if (idempotencyKey.current && lastSignature.current !== signature) {
@@ -234,7 +149,6 @@ export function NuevaVentaClient({
       lastSignature.current = signature;
       if (!idempotencyKey.current) idempotencyKey.current = crypto.randomUUID();
 
-      // Subir la factura adjunta (si se marcó factura y se eligió archivo).
       let invoicePath: string | undefined;
       if (invoiced && invoiceFile) {
         if (!uploadedInvoice.current) {
@@ -249,11 +163,9 @@ export function NuevaVentaClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           idempotencyKey: idempotencyKey.current,
-          allowOversell,
+          allowOversell: short.length > 0,
           soldAt,
-          qty: qtyNum,
-          price: priceNum,
-          discount: discountNum,
+          saleDiscount: discountFraction,
           paymentMethod: pago,
           installments: showCuotas ? Math.trunc(Number(cuotas)) || cuotaOptions[0] : undefined,
           pos: punto,
@@ -267,28 +179,25 @@ export function NuevaVentaClient({
             contact: custContact.trim() || undefined,
             address: custAddress.trim() || undefined,
           },
-          ...(otherBrand
-            ? {
-                isOtherBrand: true,
-                brand: brand.trim() || undefined,
-                article: freeArticle.trim(),
-                color: freeColor.trim() || undefined,
-                talle: freeTalle.trim() || undefined,
-              }
-            : {
-                isOtherBrand: false,
-                productId: product!.id,
-                article: product!.name,
-                color,
-                talle,
-                inventoryItemId: selectedVariant?.inventoryItemId,
-                variantGid: selectedVariant?.id,
-              }),
+          items: items.map((it) => ({
+            productId: it.productId,
+            inventoryItemId: it.inventoryItemId,
+            variantGid: it.variantGid,
+            article: it.article,
+            color: it.color,
+            talle: it.talle,
+            brand: it.brand,
+            isOtherBrand: it.isOtherBrand,
+            qty: it.qty,
+            price: it.price,
+            discount: it.discount,
+          })),
         }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Error registrando la venta");
-      // Un warning significa que algo quedo a medias (stock sin descontar, sin
+
+      // Un warning significa que algo quedó a medias (stock sin descontar, sin
       // marcar, o en negativo). En verde se lee como "todo bien" y se pasa por
       // alto justo en el aviso que hay que atender.
       if (data.warning) {
@@ -311,14 +220,6 @@ export function NuevaVentaClient({
     }
   }
 
-  // El descuento se edita en % acá y se guarda como fracción; el resto de la
-  // fórmula es la misma que usan la tabla, los KPIs y el resumen diario.
-  const net = saleNet({
-    price: Number(price) || 0,
-    discount: (Number(discount) || 0) / 100,
-    qty: Math.trunc(Number(qty)) || 1,
-  });
-
   return (
     <>
       <div className="flex items-end justify-between gap-6 pt-9 pb-1">
@@ -330,7 +231,11 @@ export function NuevaVentaClient({
           <Link href="/ventas" className={btnCls("ghost")}>
             Cancelar
           </Link>
-          <button className={btnCls("primary")} disabled={saving} onClick={submit}>
+          <button
+            className={btnCls("primary", !items.length ? "opacity-40" : undefined)}
+            disabled={saving || !items.length}
+            onClick={submit}
+          >
             {saving ? "Guardando…" : "Registrar venta"}
           </button>
         </div>
@@ -340,209 +245,56 @@ export function NuevaVentaClient({
         {/* columna principal */}
         <div className="space-y-6">
           <Card>
-            <CardTitle>Artículo</CardTitle>
+            <CardTitle>
+              Prendas{items.length > 0 && ` · ${items.length} en la venta`}
+            </CardTitle>
             <div className="px-6 pb-6 pt-4">
-              {/* toggle sadaels / otra marca */}
-              <div className="inline-flex rounded-full border border-line2 p-0.5">
-                {(["Producto Sadaels", "Otra marca"] as const).map((label, i) => (
-                  <button
-                    key={label}
-                    onClick={() => setOtherBrand(i === 1)}
-                    className={cn(
-                      "mono rounded-full px-4 py-1.5 text-[11px] uppercase tracking-wider transition-colors",
-                      (i === 1) === otherBrand ? "bg-ink text-white" : "text-mut hover:text-ink",
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {!otherBrand ? (
-                <div className="mt-5">
-                  {product ? (
-                    <div className="flex items-center gap-4 rounded-lg border border-line2 p-3">
-                      {product.image ? (
-                        <Image
-                          src={product.image}
-                          alt={product.name}
-                          width={48}
-                          height={48}
-                          className="h-12 w-12 rounded-[4px] border border-line2 object-cover"
-                        />
-                      ) : (
-                        <span className="h-12 w-12 rounded-[4px] border border-line2 bg-tile" />
-                      )}
+              {items.length > 0 && (
+                <ul className="mb-5 border-t border-line">
+                  {items.map((it) => (
+                    <li key={it.key} className="flex items-center gap-3 border-b border-line py-3">
+                      {it.color && <ColorSwatch name={it.color} size="sm" />}
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-[14px] font-medium">{product.name}</div>
-                        <div className="mono text-[10px] text-mut">
-                          {product.sku} · stock {product.stock}u · {arsFmt.format(product.price)}
+                        <div className="truncate text-[14px] font-medium">
+                          {it.article}
+                          {it.qty > 1 && (
+                            <span className="mono ml-2 text-[11px] text-mut">×{it.qty}</span>
+                          )}
+                        </div>
+                        <div className="mono text-[9px] uppercase text-mut2">
+                          {[
+                            it.talle && `Talle ${it.talle}`,
+                            it.isOtherBrand && (it.brand ?? "otra marca"),
+                            it.discount > 0 && `-${Math.round(it.discount * 100)}%`,
+                            it.available !== null && it.available < it.qty && `stock ${it.available}u`,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || "—"}
                         </div>
                       </div>
+                      <span className="font-serif text-[16px]">{arsFmt.format(saleNet(it))}</span>
                       <button
-                        className="mono text-[10px] text-mut hover:text-acc"
-                        onClick={() => {
-                          setProduct(null);
-                          setVariants(null);
-                          setColor(null);
-                          setTalle(null);
-                          setGenericLabel(null);
-                        }}
+                        type="button"
+                        aria-label={`Quitar ${it.article}`}
+                        onClick={() => setItems((prev) => prev.filter((x) => x.key !== it.key))}
+                        className="grid h-6 w-6 place-items-center rounded-full text-mut hover:text-acc"
                       >
-                        Cambiar
+                        <X className="h-3.5 w-3.5" />
                       </button>
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      <Field
-                        label="BUSCAR EN EL CATÁLOGO"
-                        placeholder="Nombre o SKU…"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                      />
-                      {results.length > 0 && (
-                        <div className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-lg border border-line2 bg-bg shadow-lg">
-                          {results.map((p) => (
-                            <button
-                              key={p.id}
-                              onClick={() => pickProduct(p)}
-                              className="flex w-full items-center gap-3 border-b border-line px-3 py-2.5 text-left last:border-0 hover:bg-panel"
-                            >
-                              {p.image ? (
-                                <Image
-                                  src={p.image}
-                                  alt={p.name}
-                                  width={32}
-                                  height={32}
-                                  className="h-8 w-8 rounded-[4px] border border-line2 object-cover"
-                                />
-                              ) : (
-                                <span className="h-8 w-8 rounded-[4px] border border-line2 bg-tile" />
-                              )}
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-[13px]">{p.name}</span>
-                                <span className="mono block text-[9px] text-mut">
-                                  {p.sku} · stock {p.stock}u
-                                </span>
-                              </span>
-                              <span className="mono text-[11px] text-mut">{arsFmt.format(p.price)}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                    </li>
+                  ))}
+                </ul>
+              )}
 
-                  {product && (
-                    <div className="mt-5">
-                      {loadingVariants ? (
-                        <p className="mono text-[11px] text-mut">Cargando variantes…</p>
-                      ) : (
-                        <>
-                          {colors.length > 0 && (
-                            <>
-                              <div className="mono text-[10px] text-mut">COLOR</div>
-                              <div className="mt-2.5 flex flex-wrap gap-2.5">
-                                {colors.map((c) => (
-                                  <ColorSwatch
-                                    key={c}
-                                    name={c}
-                                    size="md"
-                                    selected={color === c}
-                                    onClick={() => {
-                                      setColor(color === c ? null : c);
-                                      setTalle(null);
-                                    }}
-                                  />
-                                ))}
-                              </div>
-                            </>
-                          )}
-                          {sizes.length > 0 && (
-                            <>
-                              <div className="mono mt-4 text-[10px] text-mut">TALLE</div>
-                              <div className="mt-2.5 flex flex-wrap gap-2">
-                                {sizes.map((s) => {
-                                  const v = (variants ?? []).find(
-                                    (x) => (color ? x.color === color : true) && x.size === s,
-                                  );
-                                  const out = (v?.available ?? 0) <= 0;
-                                  return (
-                                    <button
-                                      key={s}
-                                      onClick={() => setTalle(talle === s ? null : s)}
-                                      className={cn(
-                                        "mono rounded-full px-3.5 py-1.5 text-[11px] transition-colors",
-                                        talle === s
-                                          ? "bg-ink text-white"
-                                          : "border border-line2 text-ink hover:border-ink/40",
-                                        out && talle !== s && "opacity-40",
-                                      )}
-                                    >
-                                      {s}
-                                      {v && <span className="ml-1.5 opacity-60">{v.available}u</span>}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </>
-                          )}
-                          {isAmbiguous && (
-                            <>
-                              <div className="mono text-[10px] text-mut">VARIANTE</div>
-                              <div className="mt-2.5">
-                                <Dropdown
-                                  value={genericLabel ?? "Elegir variante"}
-                                  options={(variants ?? []).map((v) => v.optionLabel)}
-                                  onChange={setGenericLabel}
-                                />
-                              </div>
-                            </>
-                          )}
-                          {selectedVariant && !needsColor && !needsTalle && !needsGeneric && (
-                            <p className="mono mt-4 text-[10px] text-mut">
-                              Variante seleccionada · stock {selectedVariant.available}u — al registrar se
-                              descuenta automáticamente.
-                            </p>
-                          )}
-                          {variants && variants.length === 0 && (
-                            <p className="mono mt-2 text-[10px] text-mut">
-                              Sin variantes en Shopify; la venta no descuenta stock.
-                            </p>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="mt-5 grid grid-cols-2 gap-4">
-                  <Field
-                    label="MARCA"
-                    placeholder="Ej: Alexia, Calomel, Ferrens…"
-                    value={brand}
-                    onChange={(e) => setBrand(e.target.value)}
-                  />
-                  <Field
-                    label="ARTÍCULO"
-                    placeholder="Ej: anillo sauron"
-                    value={freeArticle}
-                    onChange={(e) => setFreeArticle(e.target.value)}
-                  />
-                  <Field
-                    label="COLOR (OPCIONAL)"
-                    value={freeColor}
-                    onChange={(e) => setFreeColor(e.target.value)}
-                  />
-                  <Field
-                    label="TALLE (OPCIONAL)"
-                    value={freeTalle}
-                    onChange={(e) => setFreeTalle(e.target.value)}
-                  />
-                  <p className="col-span-2 text-[11px] text-mut">
-                    Los artículos de otras marcas (consignación) no descuentan stock del catálogo.
-                  </p>
-                </div>
+              <ProductPicker
+                products={products}
+                onAdd={(it) => setItems((prev) => [...prev, it])}
+              />
+
+              {items.length === 0 && (
+                <p className="mono mt-4 text-center text-[11px] text-mut">
+                  Buscá una prenda del catálogo (o cargá una de otra marca) y agregala a la venta.
+                </p>
               )}
             </div>
           </Card>
@@ -574,7 +326,7 @@ export function NuevaVentaClient({
         {/* sidebar */}
         <div className="space-y-6">
           <Card>
-            <CardTitle>Venta</CardTitle>
+            <CardTitle>Pago</CardTitle>
             <div className="grid grid-cols-2 gap-4 px-6 pb-6 pt-4">
               <Field
                 label="FECHA"
@@ -583,26 +335,12 @@ export function NuevaVentaClient({
                 onChange={(e) => setSoldAt(e.target.value)}
               />
               <Field
-                label="CANTIDAD"
-                type="number"
-                min={1}
-                value={qty}
-                onChange={(e) => setQty(e.target.value)}
-              />
-              <Field
-                label="PRECIO $"
-                type="number"
-                placeholder="0"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-              />
-              <Field
-                label="DESCUENTO %"
+                label="DESCUENTO GENERAL %"
                 type="number"
                 min={0}
                 max={99}
-                value={discount}
-                onChange={(e) => setDiscount(e.target.value)}
+                value={saleDiscount}
+                onChange={(e) => setSaleDiscount(e.target.value)}
               />
               <Dropdown label="FORMA DE PAGO" value={pago} options={PAGOS} onChange={changePago} />
               {showCuotas ? (
@@ -620,22 +358,36 @@ export function NuevaVentaClient({
                   <Dropdown label="PUNTO DE VENTA" value={punto} options={PUNTOS} onChange={setPunto} />
                 </div>
               )}
+
               <div className="col-span-2 border-t border-line pt-4">
                 <div className="flex items-center justify-between py-1.5">
                   <span className="text-[13px]">¿Se hizo factura?</span>
                   <Toggle on={invoiced} onChange={setInvoiced} />
                 </div>
-                {invoiced && (
-                  <InvoiceUpload file={invoiceFile} onFile={setInvoiceFile} />
-                )}
+                {invoiced && <InvoiceUpload file={invoiceFile} onFile={setInvoiceFile} />}
                 <div className="flex items-center justify-between py-1.5">
                   <span className="text-[13px]">Entregado</span>
                   <Toggle on={delivered} onChange={setDelivered} />
                 </div>
               </div>
-              <div className="col-span-2 flex items-baseline justify-between border-t border-line pt-4">
-                <span className="mono text-[10px] text-mut">TOTAL</span>
-                <span className="font-serif text-[28px] leading-none">{arsFmt.format(net)}</span>
+
+              <div className="col-span-2 border-t border-line pt-4">
+                {discountFraction > 0 && (
+                  <>
+                    <Line label={`Subtotal · ${units}u`} value={arsFmt.format(subtotal)} />
+                    <Line
+                      label={`Descuento ${Math.round(discountFraction * 100)}%`}
+                      value={`-${arsFmt.format(subtotal - total)}`}
+                      tone="acc"
+                    />
+                  </>
+                )}
+                <div className="mt-2 flex items-baseline justify-between">
+                  <span className="mono text-[10px] text-mut">
+                    TOTAL{discountFraction === 0 && units > 0 ? ` · ${units}u` : ""}
+                  </span>
+                  <span className="font-serif text-[28px] leading-none">{arsFmt.format(total)}</span>
+                </div>
               </div>
             </div>
           </Card>
@@ -658,6 +410,15 @@ export function NuevaVentaClient({
         </div>
       </div>
     </>
+  );
+}
+
+function Line({ label, value, tone }: { label: string; value: string; tone?: "acc" }) {
+  return (
+    <div className="flex items-baseline justify-between py-0.5">
+      <span className="mono text-[10px] text-mut">{label}</span>
+      <span className={cn("text-[13px]", tone === "acc" && "text-acc")}>{value}</span>
+    </div>
   );
 }
 

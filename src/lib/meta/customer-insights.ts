@@ -5,28 +5,26 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
 /**
  * Lecturas de clientes (segmentación, retención, combos) para el producto
  * vinculado a una campaña — metodología inspirada en las skills de
- * carodubi.com/skills, adaptadas a la tabla `sales` (sin order_id: se agrupa
- * por customer_dni + sold_at como proxy de "ocasión de compra").
+ * carodubi.com/skills.
+ *
+ * Desde la 0018 el cliente vive en `sales` (la compra) y el artículo en
+ * `sale_items` (la prenda), así que todo esto atraviesa las dos tablas. La
+ * "ocasión de compra" ya no hay que aproximarla con `customer_dni + sold_at`:
+ * una compra ES una fila de `sales`, que es justamente lo que faltaba.
  */
-
-type SaleRow = {
-  customer_dni: string | null;
-  article: string;
-  qty: number;
-  price: number;
-  discount: number;
-  sold_at: string;
-};
 
 async function buyerDnisOf(productId: string): Promise<string[]> {
   if (!isSupabaseConfigured()) return [];
   const supabase = await createClient();
   const { data } = await supabase
-    .from("sales")
-    .select("customer_dni")
+    .from("sale_items")
+    .select("sales!inner(customer_dni)")
     .eq("product_id", productId)
-    .not("customer_dni", "is", null);
-  return [...new Set((data ?? []).map((r) => r.customer_dni as string))];
+    .not("sales.customer_dni", "is", null);
+  const dnis = (data ?? [])
+    .map((r) => (r.sales as unknown as { customer_dni: string | null } | null)?.customer_dni)
+    .filter((d): d is string => Boolean(d));
+  return [...new Set(dnis)];
 }
 
 export type CustomerSegments = {
@@ -97,10 +95,15 @@ export async function getRetention(productId: string): Promise<RetentionInfo> {
   const supabase = await createClient();
   const [{ data: firstBuys }, { data: allSales }] = await Promise.all([
     supabase
-      .from("sales")
-      .select("customer_dni, sold_at")
+      .from("sale_items")
+      .select("sales!inner(customer_dni, sold_at)")
       .eq("product_id", productId)
-      .in("customer_dni", dnis),
+      .in("sales.customer_dni", dnis)
+      .then(({ data }) => ({
+        data: (data ?? []).map(
+          (r) => r.sales as unknown as { customer_dni: string | null; sold_at: string },
+        ),
+      })),
     supabase.from("sales").select("customer_dni, sold_at").in("customer_dni", dnis),
   ]);
 
@@ -139,14 +142,14 @@ export async function getProductAffinity(
 
   const supabase = await createClient();
   const { data } = await supabase
-    .from("sales")
-    .select("customer_dni, article")
-    .in("customer_dni", dnis)
+    .from("sale_items")
+    .select("article, product_id, sales!inner(customer_dni)")
+    .in("sales.customer_dni", dnis)
     .neq("product_id", productId);
 
   const buyersByArticle = new Map<string, Set<string>>();
-  for (const row of (data ?? []) as SaleRow[]) {
-    const dni = row.customer_dni;
+  for (const row of data ?? []) {
+    const dni = (row.sales as unknown as { customer_dni: string | null } | null)?.customer_dni;
     if (!dni || !row.article) continue;
     const set = buyersByArticle.get(row.article) ?? new Set<string>();
     set.add(dni);

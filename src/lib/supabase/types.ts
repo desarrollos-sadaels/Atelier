@@ -306,33 +306,27 @@ export type Database = {
         }
         Relationships: []
       }
-      sales: {
+      sale_items: {
         Row: {
           article: string
           brand: string | null
           color: string | null
+          counts_revenue: boolean
           created_at: string
-          customer_address: string | null
-          customer_contact: string | null
-          customer_dni: string | null
-          customer_name: string | null
-          delivered: boolean
           discount: number
+          exchange_adjustment: number
+          exchange_of_item_id: string | null
+          exchange_payment_method: string | null
           id: string
-          idempotency_key: string | null
-          installments: number | null
-          invoice_path: string | null
-          invoiced: boolean
           is_other_brand: boolean
-          notes: string | null
-          payment_method: string | null
-          pos: string | null
           price: number
           product_id: string | null
           qty: number
-          seller_id: string | null
-          seller_name: string | null
-          sold_at: string
+          return_reason: string | null
+          returned_at: string | null
+          sale_id: string
+          shopify_line_item_id: string | null
+          status: string
           stock_deducted: boolean
           talle: string | null
           variant_gid: string | null
@@ -341,28 +335,22 @@ export type Database = {
           article: string
           brand?: string | null
           color?: string | null
+          counts_revenue?: boolean
           created_at?: string
-          customer_address?: string | null
-          customer_contact?: string | null
-          customer_dni?: string | null
-          customer_name?: string | null
-          delivered?: boolean
           discount?: number
+          exchange_adjustment?: number
+          exchange_of_item_id?: string | null
+          exchange_payment_method?: string | null
           id?: string
-          idempotency_key?: string | null
-          installments?: number | null
-          invoice_path?: string | null
-          invoiced?: boolean
           is_other_brand?: boolean
-          notes?: string | null
-          payment_method?: string | null
-          pos?: string | null
           price: number
           product_id?: string | null
           qty?: number
-          seller_id?: string | null
-          seller_name?: string | null
-          sold_at?: string
+          return_reason?: string | null
+          returned_at?: string | null
+          sale_id: string
+          shopify_line_item_id?: string | null
+          status?: string
           stock_deducted?: boolean
           talle?: string | null
           variant_gid?: string | null
@@ -371,40 +359,127 @@ export type Database = {
           article?: string
           brand?: string | null
           color?: string | null
+          counts_revenue?: boolean
           created_at?: string
-          customer_address?: string | null
-          customer_contact?: string | null
-          customer_dni?: string | null
-          customer_name?: string | null
-          delivered?: boolean
           discount?: number
+          exchange_adjustment?: number
+          exchange_of_item_id?: string | null
+          exchange_payment_method?: string | null
           id?: string
-          idempotency_key?: string | null
-          installments?: number | null
-          invoice_path?: string | null
-          invoiced?: boolean
           is_other_brand?: boolean
-          notes?: string | null
-          payment_method?: string | null
-          pos?: string | null
           price?: number
           product_id?: string | null
           qty?: number
-          seller_id?: string | null
-          seller_name?: string | null
-          sold_at?: string
+          return_reason?: string | null
+          returned_at?: string | null
+          sale_id?: string
+          shopify_line_item_id?: string | null
+          status?: string
           stock_deducted?: boolean
           talle?: string | null
           variant_gid?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "sales_product_id_fkey"
+            foreignKeyName: "sale_items_exchange_of_item_id_fkey"
+            columns: ["exchange_of_item_id"]
+            isOneToOne: false
+            referencedRelation: "sale_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_items_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "sale_items_sale_id_fkey"
+            columns: ["sale_id"]
+            isOneToOne: false
+            referencedRelation: "sales"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sales: {
+        Row: {
+          created_at: string
+          customer_address: string | null
+          customer_contact: string | null
+          customer_dni: string | null
+          customer_name: string | null
+          delivered: boolean
+          has_returns: boolean
+          id: string
+          idempotency_key: string | null
+          installments: number | null
+          invoice_path: string | null
+          invoiced: boolean
+          notes: string | null
+          origin: string
+          payment_method: string | null
+          pos: string | null
+          sale_discount: number
+          seller_id: string | null
+          seller_name: string | null
+          shopify_order_id: string | null
+          shopify_order_name: string | null
+          sold_at: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          customer_address?: string | null
+          customer_contact?: string | null
+          customer_dni?: string | null
+          customer_name?: string | null
+          delivered?: boolean
+          has_returns?: boolean
+          id?: string
+          idempotency_key?: string | null
+          installments?: number | null
+          invoice_path?: string | null
+          invoiced?: boolean
+          notes?: string | null
+          origin?: string
+          payment_method?: string | null
+          pos?: string | null
+          sale_discount?: number
+          seller_id?: string | null
+          seller_name?: string | null
+          shopify_order_id?: string | null
+          shopify_order_name?: string | null
+          sold_at?: string
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          customer_address?: string | null
+          customer_contact?: string | null
+          customer_dni?: string | null
+          customer_name?: string | null
+          delivered?: boolean
+          has_returns?: boolean
+          id?: string
+          idempotency_key?: string | null
+          installments?: number | null
+          invoice_path?: string | null
+          invoiced?: boolean
+          notes?: string | null
+          origin?: string
+          payment_method?: string | null
+          pos?: string | null
+          sale_discount?: number
+          seller_id?: string | null
+          seller_name?: string | null
+          shopify_order_id?: string | null
+          shopify_order_name?: string | null
+          sold_at?: string
+          status?: string
+        }
+        Relationships: [
           {
             foreignKeyName: "sales_seller_id_fkey"
             columns: ["seller_id"]
@@ -419,15 +494,30 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      sales_daily_series: {
+        Args: { p_start: string; p_end: string }
+        Returns: {
+          day: string
+          // `numeric` viaja como string en JSON; se coacciona en queries.ts.
+          atelier_amount: number | string
+          shopify_amount: number | string
+          operations: number
+        }[]
+      }
       sales_kpis: {
         Args: { p_start: string; p_end: string }
         Returns: {
           // `numeric` viaja como string en JSON; se coacciona en queries.ts.
           total_amount: number | string
+          atelier_amount: number | string
+          shopify_amount: number | string
           units: number
           operations: number
           pending_delivery: number
           other_brand_units: number
+          returned_amount: number | string
+          returned_count: number
+          shopify_units: number
         }[]
       }
     }
@@ -439,6 +529,7 @@ export type Database = {
     }
   }
 }
+
 
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
 
