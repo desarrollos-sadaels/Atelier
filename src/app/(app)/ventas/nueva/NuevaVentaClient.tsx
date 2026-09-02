@@ -109,6 +109,11 @@ export function NuevaVentaClient({
   // la venta original con los datos viejos como si el reintento hubiese sido
   // exitoso, y la corrección se pierde en silencio).
   const lastSignature = useRef<string | null>(null);
+  // Path de la factura ya subida para ESTE intento. Sin esto, un reintento con
+  // los mismos datos volvia a subir el archivo con un UUID nuevo y, como la
+  // clave de idempotencia no cambiaba, el server devolvia la venta original:
+  // el segundo archivo quedaba huerfano en el bucket.
+  const uploadedInvoice = useRef<string | null>(null);
 
   const selectedMethod = paymentMethods.find((m) => m.name === pago) ?? null;
   const cuotaOptions = selectedMethod?.installments ?? [];
@@ -193,11 +198,15 @@ export function NuevaVentaClient({
     if (!otherBrand && (needsColor || needsTalle))
       return toast.error("Elegí color y talle de la variante vendida");
     if (!otherBrand && needsGeneric) return toast.error("Elegí la variante vendida");
+    let allowOversell = false;
     if (!otherBrand && selectedVariant && selectedVariant.available < qtyNum) {
       const ok = confirm(
         `La variante tiene stock ${selectedVariant.available} y estás vendiendo ${qtyNum}. ¿Registrar igual?`,
       );
       if (!ok) return;
+      // El server revalida contra Shopify. Este flag le dice que el faltante ya
+      // se vio y se aceptó, para que no lo reporte como hallazgo.
+      allowOversell = true;
     }
 
     setSaving(true);
@@ -220,6 +229,7 @@ export function NuevaVentaClient({
       });
       if (idempotencyKey.current && lastSignature.current !== signature) {
         idempotencyKey.current = null;
+        uploadedInvoice.current = null;
       }
       lastSignature.current = signature;
       if (!idempotencyKey.current) idempotencyKey.current = crypto.randomUUID();
@@ -227,8 +237,11 @@ export function NuevaVentaClient({
       // Subir la factura adjunta (si se marcó factura y se eligió archivo).
       let invoicePath: string | undefined;
       if (invoiced && invoiceFile) {
-        toast.loading("Subiendo factura…", { id: t });
-        invoicePath = await uploadInvoice(invoiceFile);
+        if (!uploadedInvoice.current) {
+          toast.loading("Subiendo factura…", { id: t });
+          uploadedInvoice.current = await uploadInvoice(invoiceFile);
+        }
+        invoicePath = uploadedInvoice.current;
       }
 
       const res = await fetch("/api/ventas", {
@@ -236,6 +249,7 @@ export function NuevaVentaClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           idempotencyKey: idempotencyKey.current,
+          allowOversell,
           soldAt,
           qty: qtyNum,
           price: priceNum,
@@ -274,10 +288,21 @@ export function NuevaVentaClient({
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Error registrando la venta");
-      toast.success("Venta registrada", {
-        id: t,
-        description: data.warning ?? (data.stockDeducted ? "Stock descontado en Shopify." : undefined),
-      });
+      // Un warning significa que algo quedo a medias (stock sin descontar, sin
+      // marcar, o en negativo). En verde se lee como "todo bien" y se pasa por
+      // alto justo en el aviso que hay que atender.
+      if (data.warning) {
+        toast.warning("Venta registrada, con una advertencia", {
+          id: t,
+          description: data.warning,
+          duration: 12000,
+        });
+      } else {
+        toast.success("Venta registrada", {
+          id: t,
+          description: data.stockDeducted ? "Stock descontado en Shopify." : undefined,
+        });
+      }
       router.push("/ventas");
       router.refresh();
     } catch (e) {

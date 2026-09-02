@@ -65,6 +65,36 @@ export async function notifyStockDeductionUnmarked(
   }
 }
 
+/**
+ * Deja constancia de una venta que dejó el stock en negativo SIN que nadie lo
+ * haya confirmado.
+ *
+ * El cliente ya avisa y pide confirmación cuando ve stock insuficiente, pero
+ * trabaja sobre el número que leyó al elegir el producto. Si entre ese momento y
+ * el registro entró una venta online, el vendedor confirma una venta que se ve
+ * normal y el faltante aparece solo. Este es el caso que nadie vio.
+ *
+ * Nunca lanza: la venta ya está hecha.
+ */
+export async function notifyOversold(
+  supa: Supa,
+  input: { productId: string; article: string; qty: number; available: number },
+): Promise<void> {
+  try {
+    await supa.from("notifications").insert({
+      type: "stock",
+      title: "Venta con stock insuficiente",
+      body:
+        `Se vendieron ${input.qty}u de "${input.article}" pero Shopify tenía ${input.available}u. ` +
+        "El stock quedó en negativo: revisá el inventario físico.",
+      product_id: input.productId,
+      severity: "alert",
+    });
+  } catch (e) {
+    console.error("[notify] no se pudo registrar la sobreventa:", e);
+  }
+}
+
 export type LowStockInput = {
   productId: string;
   name: string;

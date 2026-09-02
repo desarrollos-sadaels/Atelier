@@ -3,7 +3,7 @@ import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { isShopifyConfigured } from "@/lib/shopify/client";
 import { adjustInventory, getProductVariants, type VariantStock } from "@/lib/shopify/inventory";
 import { requireRole } from "@/lib/api-auth";
-import { notifyLowStock, notifyStockDeductionUnmarked } from "@/lib/notify";
+import { notifyLowStock, notifyStockDeductionUnmarked, notifyOversold } from "@/lib/notify";
 import { isValidInvoicePath } from "@/lib/sales";
 import type { TablesInsert } from "@/lib/supabase/types";
 
@@ -85,6 +85,9 @@ export async function POST(req: NextRequest) {
   const productId = !isOtherBrand ? str(body.productId) : null;
   const inventoryItemId = !isOtherBrand ? str(body.inventoryItemId) : null;
   const idempotencyKey = str(body.idempotencyKey);
+  // El cliente lo manda cuando el vendedor confirmó el diálogo de stock
+  // insuficiente. Distingue una sobreventa deliberada de una que apareció sola.
+  const allowOversell = Boolean(body.allowOversell);
 
   // El path de la factura lo manda el cliente; después se firma con service_role
   // (que ignora RLS). Solo aceptamos la forma que produce nuestro uploader.
@@ -220,6 +223,13 @@ export async function POST(req: NextRequest) {
         warning = "La venta se registró, pero Shopify no controla stock para esa variante.";
       }
 
+      // Relectura del stock del lado del server. El chequeo del cliente usa el
+      // número que leyó al elegir el producto, que para cuando se registra la
+      // venta puede tener minutos: si entró una venta online en el medio, el
+      // faltante no lo ve nadie. Igual NO se bloquea — si la prenda está en la
+      // mano hay que poder venderla — pero se deja constancia.
+      const oversold = Boolean(variant?.tracked && variant.available < qty);
+
       // --- Fase 2: el descuento. Único punto donde "no se descontó" es cierto. ---
       if (!warning && variant) {
         try {
@@ -254,6 +264,17 @@ export async function POST(req: NextRequest) {
             productId: product.id,
             article,
             qty,
+          });
+        } else if (oversold && !allowOversell) {
+          // Solo cuando el vendedor NO lo confirmó: si lo confirmó, ya lo sabe.
+          warning =
+            `Stock insuficiente: Shopify tenía ${variant.available}u y se vendieron ${qty}. ` +
+            "La venta se registró y el stock quedó en negativo — revisá el inventario físico.";
+          await notifyOversold(supaAdmin, {
+            productId: product.id,
+            article,
+            qty,
+            available: variant.available,
           });
         }
 
