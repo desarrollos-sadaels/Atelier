@@ -255,8 +255,16 @@ export type SalesFilters = {
   status?: SalesStatusFilter;
 };
 
-/** Cuántas compras puede alcanzar una búsqueda por artículo. */
-const SEARCH_MATCH_CAP = 400;
+/**
+ * Cuántas compras puede alcanzar una búsqueda por artículo.
+ *
+ * El tope no es arbitrario: estos ids viajan como `id.in.(...)` en la query
+ * string de PostgREST, y un UUID ocupa 37 caracteres. Con 400 la URL pasa los
+ * 15KB y la corta el proxy (8KB es el default habitual) — el síntoma sería un
+ * 414 en la búsqueda, no un resultado incompleto. Con 150 quedan ~5,5KB, y son
+ * tres páginas de resultados: de sobra para buscar una prenda en un mes.
+ */
+const SEARCH_MATCH_CAP = 150;
 
 /**
  * Compras del rango que mencionan el término en alguna de sus prendas.

@@ -352,6 +352,10 @@ as $$
       i.exchange_adjustment
     from public.sales s
     join public.sale_items i on i.sale_id = s.id
+    -- El filtro va acá y no solo en el join de abajo: sin él, el CTE materializa
+    -- TODAS las ventas de la historia en cada carga del dashboard para después
+    -- descartar casi todas contra los 30 días del `generate_series`.
+    where s.sold_at >= p_start and s.sold_at < p_end
   )
   select
     d::date,

@@ -274,6 +274,7 @@ export function VentasClient({
                   busy={busy === sale.id}
                   open={expanded.has(sale.id)}
                   onToggleOpen={() => toggleExpanded(sale.id)}
+                  onEnsureOpen={() => setExpanded((prev) => new Set(prev).add(sale.id))}
                   onToggleFlag={(f) => toggleFlag(sale, f)}
                   onEdit={() => setModal({ kind: "editar", sale })}
                   onDevolucion={() => setModal({ kind: "devolucion", sale })}
@@ -351,6 +352,7 @@ function SaleRows({
   busy,
   open,
   onToggleOpen,
+  onEnsureOpen,
   onToggleFlag,
   onEdit,
   onDevolucion,
@@ -363,6 +365,7 @@ function SaleRows({
   busy: boolean;
   open: boolean;
   onToggleOpen: () => void;
+  onEnsureOpen: () => void;
   onToggleFlag: (field: "delivered" | "invoiced") => void;
   onEdit: () => void;
   onDevolucion: () => void;
@@ -546,9 +549,11 @@ function SaleRows({
                         close();
                         // Con una sola prenda no hay nada que elegir; con
                         // varias, el cambio es por prenda y se hace desde su
-                        // fila, así que se despliega el detalle.
+                        // fila, así que se despliega el detalle. Si ya estaba
+                        // desplegado se deja abierto: cerrarlo acá escondería
+                        // justo los botones a los que se está mandando.
                         if (active.length === 1) onCambio(active[0]);
-                        else if (!open) onToggleOpen();
+                        else onEnsureOpen();
                       }}
                     />
                   )}
