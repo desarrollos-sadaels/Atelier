@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
+import { createAdminClient, adminConfigProblem } from "@/lib/supabase/admin";
 import { allowsInsecureLocalFallback } from "@/lib/env";
 import { hasValidSecret } from "@/lib/secrets";
 
@@ -21,11 +21,9 @@ function authorized(request: Request): boolean {
 
 export async function GET(request: Request) {
   if (!authorized(request)) return new NextResponse("No autorizado", { status: 401 });
-  if (!isAdminConfigured()) {
-    return NextResponse.json({
-      ok: false,
-      reason: "Falta SUPABASE_SERVICE_ROLE_KEY o no es una clave service_role/secret valida",
-    });
+  const configProblem = adminConfigProblem();
+  if (configProblem) {
+    return NextResponse.json({ ok: false, reason: configProblem });
   }
   try {
     const supa = createAdminClient();

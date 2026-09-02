@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
+import { createAdminClient, adminConfigProblem } from "@/lib/supabase/admin";
 import { mapProduct } from "@/lib/shopify/sync";
 import { getProductIdByInventoryItem, getProductVariants } from "@/lib/shopify/inventory";
 import { notifyLowStock } from "@/lib/notify";
@@ -119,8 +119,14 @@ export async function POST(request: Request) {
     return new NextResponse("HMAC inválido", { status: 401 });
   }
 
-  if (!isAdminConfigured()) {
-    return new NextResponse("SUPABASE_SERVICE_ROLE_KEY invalida", { status: 503 });
+  // El detalle describe la FORMA de la env var, nunca su contenido. Este 503 es
+  // el único síntoma visible cuando la config de prod está mal, y llega acá
+  // recién después de validar el HMAC: o sea que quien lo lee ya probó ser
+  // Shopify. Sin el detalle no hay forma de saber si falta la clave o si está
+  // puesta la publishable.
+  const configProblem = adminConfigProblem();
+  if (configProblem) {
+    return new NextResponse(`Supabase mal configurado: ${configProblem}`, { status: 503 });
   }
 
   const topic = request.headers.get("x-shopify-topic") || "";
