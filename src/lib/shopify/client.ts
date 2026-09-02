@@ -57,7 +57,11 @@ export async function shopifyAdmin<T = unknown>(
   });
 
   if (!res.ok) throw new Error(`Shopify ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<T>;
+
+  // Los DELETE de la Admin REST API contestan 200 con el body vacío, y
+  // `res.json()` sobre un body vacío tira. Devolvemos undefined en ese caso.
+  const body = await res.text();
+  return (body ? JSON.parse(body) : undefined) as T;
 }
 
 /** Llama a la Admin GraphQL API de Shopify. */
