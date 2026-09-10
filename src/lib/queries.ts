@@ -7,7 +7,8 @@ import { normalizeCategory } from "@/lib/categories";
 import { normalizeRole, type Role } from "@/lib/roles";
 import { parsePaymentMethods, DEFAULT_PAYMENT_METHODS, type PaymentMethod } from "@/lib/payments";
 import { parseNotificationSettings, type NotificationSettings } from "@/lib/notifications";
-import { saleItemRevenue, type SaleOrigin } from "@/lib/sales";
+import { saleItemRevenue, saleTotal, type SaleOrigin } from "@/lib/sales";
+import { workshopSaleKey } from "@/lib/workshop-sales";
 
 export type { UiProduct };
 
@@ -44,6 +45,7 @@ function toUi(p: Tables<"products">, linkedProductIds?: Set<string>): UiProduct 
     image: p.image_url ?? null,
     stockNum: p.stock,
     alertThreshold: p.alert_threshold,
+    isPreorder: p.is_preorder,
   };
 }
 
@@ -65,6 +67,7 @@ export type PickerProduct = {
   image: string | null;
   price: number;
   stock: number;
+  isPreorder: boolean;
 };
 
 /**
@@ -78,17 +81,40 @@ export type PickerProduct = {
 export async function getPickerProducts(): Promise<PickerProduct[]> {
   if (!isSupabaseConfigured()) return [];
   const supabase = await createClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, name, sku, image_url, price, stock, is_preorder")
+    .order("name", { ascending: true });
+  if (!error) {
+    return (data ?? []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      sku: p.sku ?? "—",
+      image: p.image_url,
+      price: p.price ?? 0,
+      stock: p.stock,
+      isPreorder: p.is_preorder,
+    }));
+  }
+
+  // Mantiene operativo el selector si el deploy llega antes que la columna
+  // aditiva de pre-order. La etiqueta queda apagada hasta aplicar la migración,
+  // pero el catálogo existente nunca desaparece por ese desacople temporal.
+  const fallback = await supabase
     .from("products")
     .select("id, name, sku, image_url, price, stock")
     .order("name", { ascending: true });
-  return (data ?? []).map((p) => ({
+  if (fallback.error) {
+    throw new Error(`No se pudo cargar el catálogo: ${fallback.error.message}`);
+  }
+  return (fallback.data ?? []).map((p) => ({
     id: p.id,
     name: p.name,
     sku: p.sku ?? "—",
     image: p.image_url,
     price: p.price ?? 0,
     stock: p.stock,
+    isPreorder: false,
   }));
 }
 
@@ -97,6 +123,52 @@ export async function getProductById(id: string): Promise<Tables<"products"> | n
   const supabase = await createClient();
   const { data } = await supabase.from("products").select("*").eq("id", id).limit(1);
   return data?.[0] ?? null;
+}
+
+// ---------- taller ----------
+
+export type WorkshopOrderRow = Tables<"workshop_orders">;
+
+/** Pedidos internos para preparar en el taller, pendientes primero. */
+export async function getWorkshopOrders(): Promise<WorkshopOrderRow[]> {
+  if (!isSupabaseConfigured()) return [];
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("workshop_orders")
+    .select("*")
+    .order("status", { ascending: false })
+    .order("created_at", { ascending: false });
+  const rows = data ?? [];
+  const needsLegacyHydration = rows.some(
+    (row) => (row as unknown as Record<string, unknown>).price === undefined,
+  );
+  if (!needsLegacyHydration || rows.length === 0) return rows;
+
+  // Compatibilidad durante un deploy escalonado: antes de 0021 precio y envío
+  // viven en el espejo de `sales`, unido por una clave estable. Cuando la
+  // migración esté aplicada estas propiedades ya vienen en la fila y esta
+  // segunda consulta desaparece automáticamente.
+  const keys = rows.map((row) => workshopSaleKey(row.id));
+  const { data: linkedSales } = await supabase
+    .from("sales")
+    .select(
+      "idempotency_key, shipping_amount, sale_items(price, created_at, exchange_of_item_id, shopify_line_item_id)",
+    )
+    .in("idempotency_key", keys);
+  const byKey = new Map((linkedSales ?? []).map((sale) => [sale.idempotency_key, sale]));
+
+  return rows.map((row) => {
+    const sale = byKey.get(workshopSaleKey(row.id));
+    const item = (sale?.sale_items ?? [])
+      .filter((candidate) => !candidate.exchange_of_item_id && !candidate.shopify_line_item_id)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+    return {
+      ...row,
+      price: Number(item?.price) || 0,
+      shipping_amount: Number(sale?.shipping_amount) || 0,
+      variant_label: null,
+    };
+  });
 }
 
 export type ProductCampaignLink = {
@@ -222,6 +294,60 @@ export const SALES_PAGE_SIZE = 50;
 
 export type SalesPage = { rows: SaleWithItems[]; total: number };
 
+export type SaleMovementListItem = {
+  id: string;
+  saleId: string;
+  kind: "exchange_difference" | "return";
+  amount: number;
+  occurredAt: string;
+  paymentMethod: string | null;
+  description: string | null;
+  saleLabel: string | null;
+  customerName: string | null;
+  itemArticle: string | null;
+};
+
+function artDateTime(date: string): string {
+  return new Date(`${date}T00:00:00-03:00`).toISOString();
+}
+
+/** Movimientos posteriores a una venta, agrupados por su propia fecha. */
+export async function getSaleMovements(
+  start: string,
+  end: string,
+): Promise<SaleMovementListItem[]> {
+  if (!isSupabaseConfigured()) return [];
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("sale_movements")
+    .select(
+      "id, sale_id, kind, amount, occurred_at, payment_method, description, sales(customer_name, shopify_order_name), sale_items(article)",
+    )
+    .gte("occurred_at", artDateTime(start))
+    .lt("occurred_at", artDateTime(end))
+    .order("occurred_at", { ascending: false });
+
+  return (data ?? []).map((row) => {
+    const sale = row.sales as unknown as {
+      customer_name: string | null;
+      shopify_order_name: string | null;
+    } | null;
+    const item = row.sale_items as unknown as { article: string } | null;
+    return {
+      id: row.id,
+      saleId: row.sale_id,
+      kind: row.kind === "return" ? "return" : "exchange_difference",
+      amount: Number(row.amount) || 0,
+      occurredAt: row.occurred_at,
+      paymentMethod: row.payment_method,
+      description: row.description,
+      saleLabel: sale?.shopify_order_name ?? null,
+      customerName: sale?.customer_name ?? null,
+      itemArticle: item?.article ?? null,
+    };
+  });
+}
+
 /** Rango [inicio, fin) de un mes YYYY-MM. */
 export function monthRange(month: string): { start: string; end: string } {
   const [y, m] = month.split("-").map(Number);
@@ -246,12 +372,13 @@ function sanitizeSearch(q: string): string {
  * activas. La columna `has_returns` (mantenida por trigger) es justo eso.
  */
 export type SalesStatusFilter = "active" | "returned" | "todos";
+export type SalesChannelFilter = SaleOrigin | "taller" | "todos";
 
 export type SalesFilters = {
   q?: string;
   page?: number;
   pageSize?: number;
-  origin?: SaleOrigin | "todos";
+  origin?: SalesChannelFilter;
   status?: SalesStatusFilter;
 };
 
@@ -317,7 +444,13 @@ export async function getSales(
     .gte("sold_at", start)
     .lt("sold_at", end);
 
-  if (origin !== "todos") query = query.eq("origin", origin);
+  if (origin === "shopify") query = query.eq("origin", "shopify");
+  else if (origin === "taller") query = query.like("idempotency_key", "workshop:%");
+  else if (origin === "atelier") {
+    query = query
+      .eq("origin", "atelier")
+      .or("idempotency_key.is.null,idempotency_key.not.like.workshop:%");
+  }
   if (status === "active") query = query.eq("status", "active");
   else if (status === "returned") query = query.eq("has_returns", true);
 
@@ -372,10 +505,44 @@ export async function getSellers(): Promise<Seller[]> {
   }));
 }
 
+/**
+ * Compatibilidad con una función de métricas anterior a 0022.
+ *
+ * Esa versión ya suma las ventas de Taller, pero dentro de `atelier_amount`.
+ * Mientras la migración todavía no llegó a la base, recuperamos únicamente
+ * esas compras por su clave estable y trasladamos el importe al canal correcto.
+ */
+async function getLegacyWorkshopRevenueByDay(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  start: string,
+  end: string,
+): Promise<Map<string, number>> {
+  const { data, error } = await supabase
+    .from("sales")
+    .select(
+      "sold_at, sale_discount, shipping_amount, sale_items(price, discount, qty, counts_revenue, exchange_adjustment)",
+    )
+    .like("idempotency_key", "workshop:%")
+    .gte("sold_at", start)
+    .lt("sold_at", end);
+
+  if (error) return new Map();
+
+  const revenue = new Map<string, number>();
+  for (const sale of data ?? []) {
+    const day = String(sale.sold_at).slice(0, 10);
+    const amount = saleTotal(sale, sale.sale_items ?? []);
+    revenue.set(day, (revenue.get(day) ?? 0) + amount);
+  }
+  return revenue;
+}
+
 export type SalesKpis = {
   totalAmount: number;
-  /** Facturado por ventas cargadas en el Atelier. */
+  /** Facturado por ventas cargadas directamente en el Atelier. */
   atelierAmount: number;
+  /** Facturado por pedidos personalizados cargados desde Taller. */
+  workshopAmount: number;
   /** Facturado por ventas que entraron por la tienda online. */
   shopifyAmount: number;
   units: number;
@@ -390,6 +557,7 @@ export type SalesKpis = {
 const EMPTY_KPIS: SalesKpis = {
   totalAmount: 0,
   atelierAmount: 0,
+  workshopAmount: 0,
   shopifyAmount: 0,
   units: 0,
   operations: 0,
@@ -415,9 +583,20 @@ export async function getSalesKpis(start: string, end: string): Promise<SalesKpi
   const { data } = await supabase.rpc("sales_kpis", { p_start: start, p_end: end });
   const r = data?.[0];
   if (!r) return EMPTY_KPIS;
+  const hasWorkshopAmount = "workshop_amount" in (r as unknown as Record<string, unknown>);
+  const legacyWorkshopByDay = hasWorkshopAmount
+    ? null
+    : await getLegacyWorkshopRevenueByDay(supabase, start, end);
+  const workshopAmount = hasWorkshopAmount
+    ? Number(r.workshop_amount) || 0
+    : [...(legacyWorkshopByDay?.values() ?? [])].reduce((sum, amount) => sum + amount, 0);
+  const rawAtelierAmount = Number(r.atelier_amount) || 0;
   return {
     totalAmount: Number(r.total_amount) || 0,
-    atelierAmount: Number(r.atelier_amount) || 0,
+    atelierAmount: hasWorkshopAmount
+      ? rawAtelierAmount
+      : Math.max(0, rawAtelierAmount - workshopAmount),
+    workshopAmount,
     shopifyAmount: Number(r.shopify_amount) || 0,
     units: Number(r.units) || 0,
     operations: Number(r.operations) || 0,
@@ -432,6 +611,7 @@ export async function getSalesKpis(start: string, end: string): Promise<SalesKpi
 export type SalesDay = {
   day: string;
   atelier: number;
+  taller: number;
   shopify: number;
   total: number;
   operations: number;
@@ -446,14 +626,25 @@ export async function getSalesSeries(start: string, end: string): Promise<SalesD
   if (!isSupabaseConfigured()) return [];
   const supabase = await createClient();
   const { data } = await supabase.rpc("sales_daily_series", { p_start: start, p_end: end });
+  const hasWorkshopAmount = (data ?? []).some(
+    (row) => "workshop_amount" in (row as unknown as Record<string, unknown>),
+  );
+  const legacyWorkshopByDay = hasWorkshopAmount
+    ? null
+    : await getLegacyWorkshopRevenueByDay(supabase, start, end);
   return (data ?? []).map((r) => {
-    const atelier = Number(r.atelier_amount) || 0;
+    const rawAtelier = Number(r.atelier_amount) || 0;
+    const taller = hasWorkshopAmount
+      ? Number(r.workshop_amount) || 0
+      : legacyWorkshopByDay?.get(String(r.day).slice(0, 10)) ?? 0;
+    const atelier = hasWorkshopAmount ? rawAtelier : Math.max(0, rawAtelier - taller);
     const shopify = Number(r.shopify_amount) || 0;
     return {
       day: String(r.day).slice(0, 10),
       atelier,
+      taller,
       shopify,
-      total: atelier + shopify,
+      total: atelier + taller + shopify,
       operations: Number(r.operations) || 0,
     };
   });
@@ -472,16 +663,18 @@ function todayRangeART(): { start: string; end: string } {
   return { start, end };
 }
 
-/** Monto vendido "hoy" (Buenos Aires), abierto por plataforma — KPI del dashboard. */
+/** Monto vendido "hoy" (Buenos Aires), abierto por canal — KPI del dashboard. */
 export async function getTodaySales(): Promise<{
   totalAmount: number;
   atelierAmount: number;
+  workshopAmount: number;
   shopifyAmount: number;
   operations: number;
 }> {
   const { start, end } = todayRangeART();
-  const { totalAmount, atelierAmount, shopifyAmount, operations } = await getSalesKpis(start, end);
-  return { totalAmount, atelierAmount, shopifyAmount, operations };
+  const { totalAmount, atelierAmount, workshopAmount, shopifyAmount, operations } =
+    await getSalesKpis(start, end);
+  return { totalAmount, atelierAmount, workshopAmount, shopifyAmount, operations };
 }
 
 /** Rango [hoy-N, mañana) en Buenos Aires — para el gráfico de los últimos N días. */
@@ -574,6 +767,21 @@ export async function getRealRevenueByMetaCampaignId(
     if (!meta) continue;
     const sale = it.sales as unknown as { sale_discount: number | string } | null;
     revenue[meta] += saleItemRevenue(it, sale?.sale_discount ?? 0);
+  }
+
+  // Diferencias y devoluciones se atribuyen al producto de la prenda, pero a
+  // la fecha real del movimiento, no a la venta original.
+  const { data: movements } = await supabase
+    .from("sale_movements")
+    .select("amount, sale_items!inner(product_id)")
+    .in("sale_items.product_id", [...productToMeta.keys()])
+    .gte("occurred_at", artDateTime(start))
+    .lt("occurred_at", artDateTime(end));
+
+  for (const movement of movements ?? []) {
+    const item = movement.sale_items as unknown as { product_id: string | null } | null;
+    const meta = item?.product_id ? productToMeta.get(item.product_id) : undefined;
+    if (meta) revenue[meta] += Number(movement.amount) || 0;
   }
   return revenue;
 }

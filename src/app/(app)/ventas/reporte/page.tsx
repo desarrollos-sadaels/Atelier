@@ -16,7 +16,7 @@ export default async function ReportePage() {
   end.setDate(end.getDate() + 1); // rango [inicio, fin), incluye hoy
 
   const k = await getSalesKpis(isoDate(start), isoDate(end));
-  const hasSales = k.operations > 0;
+  const hasSales = k.operations > 0 || k.totalAmount !== 0 || k.returnedCount > 0;
 
   const summary = [
     { k: "Ventas", v: hasSales ? formatARS(k.totalAmount) : "—", acc: hasSales },
@@ -24,7 +24,7 @@ export default async function ReportePage() {
     { k: "Operaciones", v: hasSales ? String(k.operations) : "—" },
     {
       k: "Ticket prom.",
-      v: hasSales ? formatARS(Math.round(k.totalAmount / k.operations)) : "—",
+      v: k.operations > 0 ? formatARS(Math.round(k.totalAmount / k.operations)) : "—",
     },
   ];
 

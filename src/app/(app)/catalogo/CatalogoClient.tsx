@@ -7,7 +7,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { Dropdown } from "@/components/Dropdown";
-import { Dot, btnCls } from "@/components/ui";
+import { Chip, Dot, btnCls } from "@/components/ui";
 import { Download, Plus, Dots } from "@/components/icons";
 import type { UiProduct } from "@/lib/ui-types";
 import { cn } from "@/lib/cn";
@@ -221,7 +221,10 @@ export function CatalogoClient({
                         ) : (
                           <span className="h-10 w-10 shrink-0 rounded-[4px] border border-line2 bg-tile" />
                         )}
-                        <span className="block text-[14px] font-medium group-hover:underline">{p.name}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="block text-[14px] font-medium group-hover:underline">{p.name}</span>
+                          {p.isPreorder && <Chip tone="acc">Pre-order</Chip>}
+                        </span>
                       </Link>
                     </td>
                     <td className="text-[13px] text-ink2">{p.cat}</td>
@@ -268,7 +271,10 @@ export function CatalogoClient({
                         <span className="h-10 w-10 shrink-0 rounded-[4px] border border-line2 bg-tile" />
                       )}
                       <span>
-                        <span className="block text-[14px] font-medium group-hover:underline">{p.name}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="block text-[14px] font-medium group-hover:underline">{p.name}</span>
+                          {p.isPreorder && <Chip tone="acc">Pre-order</Chip>}
+                        </span>
                         <span className="mono block text-[9px] text-mut2">desde Shopify</span>
                       </span>
                     </Link>

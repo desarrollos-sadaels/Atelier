@@ -41,11 +41,11 @@ export default async function DashboardPage() {
     {
       label: "Ventas hoy",
       value: todaySales.operations > 0 ? formatARS(todaySales.totalAmount) : "—",
-      // Abrir el número por plataforma es el punto: el mismo KPI ahora suma el
-      // local y la tienda online, y sin el desglose no se sabe cuál movió.
+      // El total suma los tres canales; el desglose evita confundir Taller con
+      // las ventas cargadas directamente en Atelier.
       sub:
         todaySales.operations > 0
-          ? `${formatARS(todaySales.atelierAmount)} atelier · ${formatARS(todaySales.shopifyAmount)} online`
+          ? `${formatARS(todaySales.atelierAmount)} atelier · ${formatARS(todaySales.workshopAmount)} taller · ${formatARS(todaySales.shopifyAmount)} online`
           : "sin ventas todavía",
       alert: false,
     },

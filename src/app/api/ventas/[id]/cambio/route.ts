@@ -68,8 +68,8 @@ function parseItem(raw: unknown, index: number): ParsedItem | { error: string } 
  *
  * El modelo de plata es el punto no obvio, y es una decisión de negocio, no una
  * técnica: **el importe de la venta original no baja nunca**. Si lo nuevo sale
- * más caro, el cliente paga la diferencia y esa diferencia se suma a la prenda
- * original (`exchange_adjustment`). Si sale más barato, el sobrante queda a
+ * más caro, el cliente paga la diferencia y esa diferencia se registra como un
+ * movimiento económico del día del cambio. Si sale más barato, el sobrante queda a
  * favor del negocio: no se devuelve plata, así que el mes cierra igual.
  *
  * De ahí sale el reparto entre filas, que a primera vista parece redundante:
@@ -210,10 +210,10 @@ export async function POST(
     .from("sale_items")
     .update({
       status: "exchanged",
-      // La plata se queda acá: la prenda original sigue facturando, más la
-      // diferencia que el cliente haya pagado de más.
-      exchange_adjustment: balance.toCharge,
-      exchange_payment_method: balance.toCharge > 0 ? str(body.differencePaymentMethod) : null,
+      // La prenda original conserva solamente su importe original. Las
+      // diferencias nuevas se registran como movimientos con fecha propia.
+      exchange_adjustment: 0,
+      exchange_payment_method: null,
     })
     .eq("id", itemId)
     .in("status", original.status === "exchanged" ? ["exchanged"] : ["active"])
@@ -270,8 +270,32 @@ export async function POST(
     );
   }
 
+  // La diferencia es un ingreso del momento del cambio, no de la fecha de la
+  // venta original. `source_key` evita duplicarla ante reintentos.
+  if (balance.toCharge > 0) {
+    const { error: movementError } = await supaAdmin.from("sale_movements").insert({
+      sale_id: id,
+      sale_item_id: itemId,
+      kind: "exchange_difference",
+      amount: balance.toCharge,
+      payment_method: str(body.differencePaymentMethod),
+      description: `Diferencia por cambio de ${original.article}`,
+      created_by: auth.identity.userId,
+      source_key: `exchange:${itemId}`,
+    });
+    if (movementError) {
+      // El stock nuevo todavía no se descontó: borrar estas filas deja el
+      // intento reanudable por el mecanismo existente.
+      await supaAdmin.from("sale_items").delete().in("id", created.map((row) => row.id));
+      return NextResponse.json(
+        { ok: false, error: `No se registró la diferencia del cambio: ${movementError.message}` },
+        { status: 500 },
+      );
+    }
+  }
+
   // Dejar constancia en la compra de qué se cambió por qué. Es lo único que
-  // después explica un `exchange_adjustment` suelto en el reporte.
+  // después explica el movimiento de diferencia en el reporte.
   const note =
     `Cambio ${new Date().toLocaleDateString("es-AR")}: ${original.article} → ` +
     items.map((it) => `${it.article}${it.qty > 1 ? ` ×${it.qty}` : ""}`).join(", ") +

@@ -3,6 +3,7 @@ import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { requireRole, type ApiIdentity } from "@/lib/api-auth";
 import { restockItem } from "@/lib/sales-ops";
 import { isValidInvoicePath } from "@/lib/sales";
+import { isMissingWorkshopColumns, workshopOrderIdFromKey } from "@/lib/workshop-sales";
 import type { Tables, TablesUpdate } from "@/lib/supabase/types";
 
 type Supa = ReturnType<typeof createAdminClient>;
@@ -82,7 +83,7 @@ export async function PATCH(
   // el id.
   const { data: sale, error: fetchErr } = await supaAdmin
     .from("sales")
-    .select("id, seller_id, origin, status")
+    .select("id, seller_id, origin, status, idempotency_key")
     .eq("id", id)
     .maybeSingle();
   if (fetchErr) {
@@ -126,6 +127,7 @@ export async function PATCH(
     "claim" in body ||
     "sellerId" in body ||
     "saleDiscount" in body ||
+    "shippingAmount" in body ||
     "customer" in body;
 
   if (liveFields && sale.status !== "active") {
@@ -203,9 +205,80 @@ export async function PATCH(
     }
     patch.sale_discount = discount;
   }
+  const workshopOrderId = workshopOrderIdFromKey(sale.idempotency_key);
+
+  if ("shippingAmount" in body) {
+    if (sale.origin === "shopify") {
+      return NextResponse.json(
+        { ok: false, error: "El costo de envío de Shopify lo fija la tienda" },
+        { status: 409 },
+      );
+    }
+    const shipping = body.shippingAmount == null || body.shippingAmount === ""
+      ? 0
+      : Number(body.shippingAmount);
+    if (!Number.isFinite(shipping) || shipping < 0) {
+      return NextResponse.json({ ok: false, error: "Costo de envío inválido" }, { status: 400 });
+    }
+    patch.shipping_amount = shipping;
+  }
+
+  // Cliente, envío y notas son datos compartidos con el pedido de Taller. Si
+  // esta compra nació allí, Taller sigue siendo la fuente editable de esos
+  // campos y su trigger actualiza también la venta y la prenda sin tocar stock.
+  let workshopUpdated = false;
+  if (workshopOrderId) {
+    const workshopPatch: TablesUpdate<"workshop_orders"> = {};
+    const customer = body.customer;
+    if (customer && typeof customer === "object") {
+      const source = customer as Record<string, unknown>;
+      if ("name" in source) {
+        const name = str(source.name);
+        if (!name) {
+          return NextResponse.json(
+            { ok: false, error: "El cliente del pedido de Taller es obligatorio" },
+            { status: 400 },
+          );
+        }
+        workshopPatch.customer_name = name;
+      }
+      if ("contact" in source) {
+        workshopPatch.customer_contact = str(source.contact);
+      }
+    }
+    if ("shippingAmount" in body) {
+      workshopPatch.shipping_amount = patch.shipping_amount ?? 0;
+    }
+    if ("notes" in body) {
+      workshopPatch.detail = patch.notes ?? null;
+    }
+
+    if (Object.keys(workshopPatch).length) {
+      const workshopUpdate = { ...workshopPatch, updated_at: new Date().toISOString() };
+      let { error: workshopError } = await supaAdmin
+        .from("workshop_orders")
+        .update(workshopUpdate)
+        .eq("id", workshopOrderId);
+      if (workshopError && isMissingWorkshopColumns(workshopError)) {
+        const legacyUpdate: TablesUpdate<"workshop_orders"> = { ...workshopUpdate };
+        delete legacyUpdate.shipping_amount;
+        const fallback = await supaAdmin
+          .from("workshop_orders")
+          .update(legacyUpdate)
+          .eq("id", workshopOrderId);
+        workshopError = fallback.error;
+      }
+      if (workshopError) {
+        return NextResponse.json({ ok: false, error: workshopError.message }, { status: 500 });
+      }
+      workshopUpdated = true;
+    }
+  }
 
   if (!Object.keys(patch).length) {
-    return NextResponse.json({ ok: false, error: "Nada para actualizar" }, { status: 400 });
+    return workshopUpdated
+      ? NextResponse.json({ ok: true, id })
+      : NextResponse.json({ ok: false, error: "Nada para actualizar" }, { status: 400 });
   }
 
   const { error } = await supaAdmin.from("sales").update(patch).eq("id", id);
@@ -237,11 +310,17 @@ export async function DELETE(
   const supaAdmin: Supa = createAdminClient();
   const { data: sale, error: fetchErr } = await supaAdmin
     .from("sales")
-    .select("id, sale_items(id, article, qty, product_id, variant_gid, stock_deducted)")
+    .select("id, idempotency_key, sale_items(id, article, qty, product_id, variant_gid, stock_deducted)")
     .eq("id", id)
     .maybeSingle();
   if (fetchErr) return NextResponse.json({ ok: false, error: fetchErr.message }, { status: 500 });
   if (!sale) return NextResponse.json({ ok: false, error: "Venta no encontrada" }, { status: 404 });
+  if (workshopOrderIdFromKey(sale.idempotency_key)) {
+    return NextResponse.json(
+      { ok: false, error: "Esta venta se elimina desde el pedido correspondiente en Taller" },
+      { status: 409 },
+    );
+  }
 
   // Reponer TODO antes de borrar nada. Si una prenda no puede volver al
   // inventario, se aborta con la compra intacta: es preferible una venta que
