@@ -52,8 +52,19 @@ export type ReportRange = {
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Años que acepta el reporte. No es cosmético: `Date.UTC` interpreta 0–99 como
+ * 1900–1999, así que `0026-01-01` pasaba el tope de días (contaba 2) pero
+ * terminaba pidiendo casi dos mil años; y `9999-12-31` hace que `end` salga
+ * del rango de fechas de Postgres y la consulta falle.
+ */
+const MIN_YEAR = 2000;
+const MAX_YEAR = 2100;
+
 export function isIsoDate(v: unknown): v is string {
   if (typeof v !== "string" || !ISO_RE.test(v)) return false;
+  const year = Number(v.slice(0, 4));
+  if (year < MIN_YEAR || year > MAX_YEAR) return false;
   // `new Date("2026-02-31")` no falla: salta al 3 de marzo. Hay que comparar.
   const d = new Date(`${v}T00:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
@@ -104,17 +115,22 @@ export function presetBounds(preset: NamedPreset, today: string): [string, strin
  * - Hoy / 7 días / 30 días conservan la DURACIÓN: marcar el 1/9 con "7 días"
  *   da 1/9–7/9.
  * - Este mes / Mes anterior conservan la FORMA: marcar cualquier día da el mes
- *   calendario que lo contiene, cortado en hoy si es el mes en curso (el resto
- *   del mes todavía no tiene ventas y solo alargaría el "días" del rótulo).
+ *   calendario que lo contiene.
+ *
+ * En los dos casos el fin se corta en hoy: los días que todavía no pasaron no
+ * tienen ventas y solo inflarían el "30 días" del rótulo. Con "30 días" y el
+ * 1/9 marcado un 14/9, el rango es 1/9–14/9 y dice 14 días.
  */
 export function rangeFromStart(preset: NamedPreset, start: string, today: string): [string, string] {
+  // Un inicio en el futuro no tiene hoy contra el cual cortar: queda en un día.
+  const upTo = (end: string): [string, string] => [start, end > today ? (start > today ? start : today) : end];
   switch (preset) {
     case "hoy":
       return [start, start];
     case "7d":
-      return [start, addDays(start, 6)];
+      return upTo(addDays(start, 6));
     case "30d":
-      return [start, addDays(start, 29)];
+      return upTo(addDays(start, 29));
     case "mes":
     case "mes-anterior": {
       const first = `${start.slice(0, 7)}-01`;
@@ -223,7 +239,10 @@ export function saleChannel(sale: {
   origin: string;
   workshop_order_id?: string | null;
 }): SaleChannel {
-  const pos = (sale.pos ?? "").trim().toUpperCase();
+  // Solo espacios, no `trim()`: el `trim` de Postgres saca únicamente espacios,
+  // y el de JS además tabs y saltos de línea. Con `trim()`, un "MAYORISTAS\t"
+  // cargado por fuera de la app era Mayoristas en el CSV y Atelier en los totales.
+  const pos = (sale.pos ?? "").replace(/^ +| +$/g, "").toUpperCase();
   if (pos === WORKSHOP_POS || sale.workshop_order_id) return "taller";
   if (pos === WHOLESALE_POS) return "mayoristas";
   return sale.origin === "shopify" ? "shopify" : "atelier";

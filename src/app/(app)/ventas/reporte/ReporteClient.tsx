@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type ReactNode } from "react";
+import { toast } from "sonner";
 import { Card, btnCls } from "@/components/ui";
 import { Toggle } from "@/components/forms";
 import { Dropdown } from "@/components/Dropdown";
@@ -104,10 +105,25 @@ export function ReporteClient({
     });
   }
 
-  const hrefWith = (extra: Record<string, string>, base = "/ventas/reporte") => {
+  const hrefWith = (extra: Record<string, string>) => {
     const p = new URLSearchParams(applied);
     for (const [k, v] of Object.entries(extra)) p.set(k, v);
-    return `${base}?${p.toString()}`;
+    return `/ventas/reporte?${p.toString()}`;
+  };
+
+  // Los exports llevan las FECHAS de la vista previa, nunca el preset. Con
+  // `rango=hoy`, generar a las 23:58 y descargar a las 00:01 bajaba el día
+  // siguiente: la API vuelve a calcular "hoy" al momento de la descarga.
+  const exportHref = (tipo: "pdf" | "resumen" | "detalle") => {
+    const p = reportSearchParams({
+      preset: "custom",
+      from: range.from,
+      to: range.to,
+      channels,
+      sellerId: ownOnly ? null : sellerId,
+    });
+    p.set("tipo", tipo);
+    return `/api/ventas/reporte?${p.toString()}`;
   };
 
   const employeeMode = Boolean(sellerId);
@@ -164,7 +180,6 @@ export function ReporteClient({
         sellerName={sellerName}
         sellerOptions={sellerOptions}
         ownOnly={ownOnly}
-        appliedQs={appliedQs}
         pending={pending}
         onApply={apply}
       />
@@ -188,15 +203,15 @@ export function ReporteClient({
             <div className="flex flex-wrap gap-2">
               {/* El PDF es la vista previa tal cual, para mandar o imprimir; los
                   CSV son los datos, para trabajarlos en una planilla. */}
-              <a href={hrefWith({ tipo: "pdf" }, "/api/ventas/reporte")} download className={btnCls("dark", "h-9 px-4 text-[12px]")}>
-                <Download className="h-3.5 w-3.5" /> Descargar PDF
-              </a>
-              <a href={hrefWith({ tipo: "resumen" }, "/api/ventas/reporte")} download className={btnCls("ghost", "h-9 px-4 text-[12px]")}>
-                <Download className="h-3.5 w-3.5" /> Resumen CSV
-              </a>
-              <a href={hrefWith({ tipo: "detalle" }, "/api/ventas/reporte")} download className={btnCls("ghost", "h-9 px-4 text-[12px]")}>
-                <Download className="h-3.5 w-3.5" /> Detalle por prenda
-              </a>
+              <DownloadButton href={exportHref("pdf")} fallbackName="reporte-ventas.pdf" variant="dark">
+                Descargar PDF
+              </DownloadButton>
+              <DownloadButton href={exportHref("resumen")} fallbackName="ventas-resumen.csv">
+                Resumen CSV
+              </DownloadButton>
+              <DownloadButton href={exportHref("detalle")} fallbackName="ventas-detalle.csv">
+                Detalle por prenda
+              </DownloadButton>
             </div>
           )}
         </div>
@@ -262,7 +277,6 @@ function ReportForm({
   sellerName,
   sellerOptions,
   ownOnly,
-  appliedQs,
   pending,
   onApply,
 }: {
@@ -273,7 +287,6 @@ function ReportForm({
   sellerName: string | null;
   sellerOptions: SellerOption[];
   ownOnly: boolean;
-  appliedQs: string;
   pending: boolean;
   onApply: (qs: string) => void;
 }) {
@@ -305,7 +318,15 @@ function ReportForm({
     channels: draftChannels,
     sellerId: perEmployee && !ownOnly ? draftSeller : null,
   }).toString();
-  const dirty = qs !== appliedQs;
+  // Se compara el reporte que se pediría, no el texto de la URL: con "7 días"
+  // aplicado, tocar "Personalizado" sin mover las fechas cambia `rango=7d` por
+  // `rango=custom&desde…`, y marcaba "cambios sin aplicar" para el mismo reporte.
+  // Los canales vienen normalizados de los dos lados, así que se comparan en orden.
+  const dirty =
+    from !== range.from ||
+    to !== range.to ||
+    draftChannels.join() !== channels.join() ||
+    (perEmployee && !ownOnly ? draftSeller : null) !== (ownOnly ? null : sellerId);
   const canApply = !rangeError && !needsSeller && !pending;
 
   function choosePreset(p: NamedPreset) {
@@ -397,16 +418,23 @@ function ReportForm({
 
             {/* por empleado */}
             <fieldset>
+              {/* El `legend` tiene que ser el primer hijo del fieldset para
+                  nombrar el grupo; el título visible va aparte por el layout. */}
+              <legend className="sr-only">Resumen por empleado</legend>
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <legend className="text-[13px] font-medium">Resumen por empleado</legend>
+                  <div className="text-[13px] font-medium" aria-hidden>
+                    Resumen por empleado
+                  </div>
                   <p className="mt-0.5 text-[11px] text-mut">
                     {ownOnly
                       ? `Ves solo las ventas registradas por tu cuenta${sellerName ? ` (${sellerName})` : ""}.`
                       : "Solo las ventas registradas por una cuenta."}
                   </p>
                 </div>
-                {!ownOnly && <Toggle on={perEmployee} onChange={setPerEmployee} />}
+                {!ownOnly && (
+                  <Toggle on={perEmployee} onChange={setPerEmployee} label="Resumen por empleado" />
+                )}
               </div>
               {perEmployee && !ownOnly && (
                 <div className="mt-3">
@@ -475,6 +503,73 @@ function Pill({
   );
 }
 
+/**
+ * Descarga de un export. Va por `fetch` y no con `<a download>` por dos cosas
+ * que el link no puede hacer: si la API responde error (sesión vencida, 403,
+ * 500), el link guardaba un archivo con el JSON del error como si fuera el
+ * reporte; y el aviso de detalle truncado viaja en un header que nadie veía.
+ */
+function DownloadButton({
+  href,
+  fallbackName,
+  variant = "ghost",
+  children,
+}: {
+  href: string;
+  fallbackName: string;
+  variant?: "dark" | "ghost";
+  children: ReactNode;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function download() {
+    setBusy(true);
+    try {
+      const res = await fetch(href, { cache: "no-store" });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        toast.error("No se pudo descargar el reporte", {
+          description: body?.error ?? `El servidor respondió ${res.status}.`,
+        });
+        return;
+      }
+      const blob = await res.blob();
+      const name =
+        /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? fallbackName;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revocar en el mismo tick puede cortar la descarga en algunos navegadores.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if (res.headers.get("X-Report-Truncated")) {
+        toast.warning("El detalle salió incompleto", {
+          description: "El período tiene más compras de las que entran en un export. Acotá el rango.",
+        });
+      }
+    } catch {
+      toast.error("No se pudo descargar el reporte", { description: "Revisá la conexión y probá de nuevo." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={download}
+      disabled={busy}
+      aria-busy={busy}
+      className={btnCls(variant, "h-9 px-4 text-[12px] disabled:opacity-60")}
+    >
+      <Download className="h-3.5 w-3.5" /> {busy ? "Generando…" : children}
+    </button>
+  );
+}
+
 // ---------- calendario ----------
 
 function CalendarGlyph() {
@@ -515,8 +610,9 @@ function DateRangePicker({
     <Popover
       triggerClass="block w-full max-w-[420px] text-left"
       panelClass="w-[300px] p-3"
+      triggerLabel={`Rango: ${formatRangeLabel(from, to)}. Abrir calendario`}
       trigger={
-        <span className="grid grid-cols-2 gap-3" aria-label={`Rango: ${formatRangeLabel(from, to)}. Abrir calendario`}>
+        <span className="grid grid-cols-2 gap-3">
           <DateBox label="DESDE" value={from} />
           <DateBox label="HASTA" value={to} />
         </span>

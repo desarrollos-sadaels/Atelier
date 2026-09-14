@@ -27,10 +27,19 @@ function sellerOptions(sellers: Seller[]): SellerOption[] {
   });
 }
 
+type Param = string | string[] | undefined;
+
+/**
+ * Next entrega un parámetro repetido (`?rango=hoy&rango=7d`) como array. Sin
+ * esto, `?canal=atelier&canal=shopify` tiraba "v.split is not a function" y la
+ * página entera daba error.
+ */
+const first = (v: Param): string | undefined => (Array.isArray(v) ? v[0] : v);
+
 /**
  * Reporte de ventas. El estado aplicado vive en la URL (igual que Ventas): se
- * puede compartir con un link, y los exports (CSV y PDF) leen los mismos
- * parámetros, así que descargan la vista previa que se generó.
+ * puede compartir con un link, y los exports (CSV y PDF) reciben las mismas
+ * fechas, canales y cuenta, así que descargan la vista previa que se generó.
  *
  * Los números los arma `loadSalesReport`, que es la misma función que usa el
  * PDF: la pantalla y el archivo no pueden contar cosas distintas.
@@ -39,16 +48,17 @@ export default async function ReportePage({
   searchParams,
 }: {
   searchParams: Promise<{
-    rango?: string;
-    desde?: string;
-    hasta?: string;
-    canal?: string;
-    vendedor?: string;
+    rango?: Param;
+    desde?: Param;
+    hasta?: Param;
+    canal?: Param;
+    vendedor?: Param;
   }>;
 }) {
   const sp = await searchParams;
-  const range = resolveReportRange(sp);
-  const channels = parseReportChannels(sp.canal);
+  const range = resolveReportRange({ rango: first(sp.rango), desde: first(sp.desde), hasta: first(sp.hasta) });
+  // Los canales repetidos se suman: es la forma natural de pedir varios.
+  const channels = parseReportChannels(Array.isArray(sp.canal) ? sp.canal.join(",") : sp.canal);
 
   // La cuenta del reporte depende del rol, que sale del perfil: por eso el
   // perfil va antes que los números.
@@ -60,7 +70,7 @@ export default async function ReportePage({
   // deja leer todas las ventas a la staff), pero sus comisiones no tienen por
   // qué quedar a la vista de sus compañeros.
   const ownOnly = role === "vendedor";
-  const sellerId = ownOnly ? (profile?.id ?? null) : parseSellerId(sp.vendedor);
+  const sellerId = ownOnly ? (profile?.id ?? null) : parseSellerId(first(sp.vendedor));
 
   const data = await loadSalesReport(range, {
     channels,
@@ -70,10 +80,20 @@ export default async function ReportePage({
   });
 
   const options = sellerOptions(sellers);
+  const rowName = sellerId ? (data.rows.find((r) => r.sellerId === sellerId)?.name ?? null) : null;
+
+  // "Ver resumen" también lleva a cuentas que el selector no lista (un perfil
+  // de medios, o uno que ya no existe pero dejó ventas). Sin agregarla, la
+  // vista decía "Resumen de X" y el formulario "Elegí una cuenta", sin forma de
+  // volver a elegirla.
+  if (sellerId && !ownOnly && !options.some((o) => o.id === sellerId)) {
+    options.unshift({ id: sellerId, label: sellerLabel({ sellerId, name: rowName }) });
+  }
+
   const sellerName = sellerId
     ? (options.find((o) => o.id === sellerId)?.label ??
       (ownOnly ? profile?.name : null) ??
-      sellerLabel({ sellerId, name: data.rows.find((r) => r.sellerId === sellerId)?.name ?? null }))
+      sellerLabel({ sellerId, name: rowName }))
     : null;
 
   return (
