@@ -84,6 +84,10 @@ export default async function LoginPage({
             alt="Editorial Atelier S/S 26"
             fill
             priority
+            // La columna de la imagen es lo que queda al lado del panel de 560px,
+            // y debajo de `lg` está oculta: sin `sizes`, Next asumía 100vw y
+            // precargaba la versión más grande también en el celular.
+            sizes="(min-width: 1024px) calc(100vw - 560px), 0px"
             className="u-fade object-cover object-top"
           />
           <div className="absolute inset-x-0 bottom-0 h-[300px] bg-gradient-to-t from-black/80 to-transparent" />
