@@ -18,7 +18,8 @@ import { ProductPicker, type ChosenItem } from "../ProductPicker";
 
 export type { PickerProduct } from "@/lib/queries";
 
-const PUNTOS = ["LOCAL", "SHOPIFY", "CHAT", "INSTAGRAM", "WHATSAPP", "FASHION X GLOBAL", "AMIGOS Y FAMILIA"];
+// MAYORISTAS es además un canal aparte en el reporte de ventas (ver `saleChannel`).
+const PUNTOS = ["LOCAL", "SHOPIFY", "CHAT", "INSTAGRAM", "WHATSAPP", "FASHION X GLOBAL", "AMIGOS Y FAMILIA", "MAYORISTAS"];
 
 async function uploadInvoice(file: File): Promise<string> {
   const supabase = createClient();

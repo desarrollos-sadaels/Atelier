@@ -24,6 +24,8 @@ export const PUNTOS_DE_VENTA = [
   "WHATSAPP",
   "FASHION X GLOBAL",
   "AMIGOS Y FAMILIA",
+  // El reporte cuenta este punto de venta como canal aparte (ver `saleChannel`).
+  "MAYORISTAS",
 ];
 
 async function uploadInvoice(file: File): Promise<string> {
