@@ -77,6 +77,9 @@ export function NuevaVentaClient({
   const [invoiced, setInvoiced] = useState(false);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [delivered, setDelivered] = useState(true);
+  // Preventa: se cobra una prenda que todavía no está. Ver `deliveryState` en
+  // src/lib/sales.ts — la marca y la entrega son dos cosas distintas.
+  const [preorder, setPreorder] = useState(false);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -97,6 +100,19 @@ export function NuevaVentaClient({
   const selectedMethod = paymentMethods.find((m) => m.name === pago) ?? null;
   const cuotaOptions = selectedMethod?.installments ?? [];
   const showCuotas = cuotaOptions.length > 0;
+
+  /**
+   * Marcar la compra como preventa apaga la entrega, y no es cosmético: el
+   * default de `delivered` es true (lo normal es que el cliente se lleve la
+   * prenda puesta), así que sin esto una preventa nacía "entregada" y no
+   * aparecía en ninguna lista de lo que falta entregar. El server lo vuelve a
+   * forzar — esto es para que la pantalla no muestre otra cosa que lo que se
+   * va a guardar.
+   */
+  function markPreorder(on: boolean) {
+    setPreorder(on);
+    if (on) setDelivered(false);
+  }
 
   function changePago(name: string) {
     setPago(name);
@@ -137,7 +153,7 @@ export function NuevaVentaClient({
       // respuesta perdida), el server devuelve la venta original en vez de
       // registrarla de nuevo y descontar stock dos veces.
       const signature = JSON.stringify({
-        soldAt, saleDiscount, pago, cuotas, punto, invoiced, delivered, notes,
+        soldAt, saleDiscount, pago, cuotas, punto, invoiced, delivered, preorder, notes,
         custName, custDni, custContact, custAddress,
         items: items.map((it) => [it.article, it.qty, it.price, it.discount, it.variantGid]),
         invoiceFile: invoiceFile ? `${invoiceFile.name}:${invoiceFile.size}:${invoiceFile.lastModified}` : null,
@@ -172,6 +188,7 @@ export function NuevaVentaClient({
           invoiced,
           invoicePath,
           delivered,
+          preorder,
           notes: notes.trim() || undefined,
           customer: {
             name: custName.trim() || undefined,
@@ -366,9 +383,23 @@ export function NuevaVentaClient({
                 </div>
                 {invoiced && <InvoiceUpload file={invoiceFile} onFile={setInvoiceFile} />}
                 <div className="flex items-center justify-between py-1.5">
-                  <span className="text-[13px]">Entregado</span>
-                  <Toggle on={delivered} onChange={setDelivered} />
+                  <span className="text-[13px]">Preventa</span>
+                  <Toggle on={preorder} onChange={markPreorder} />
                 </div>
+                {/* Una preventa no tiene mercadería para entregar todavía, así
+                    que el toggle de entrega no aplica: se muestra el estado con
+                    el que va a aparecer en el listado. */}
+                {preorder ? (
+                  <p className="mono py-1.5 text-[10px] leading-relaxed text-mut">
+                    La compra queda en <span className="text-acc">Esperando entrega</span>. Se marca
+                    entregada desde Ventas cuando llegue la prenda.
+                  </p>
+                ) : (
+                  <div className="flex items-center justify-between py-1.5">
+                    <span className="text-[13px]">Entregado</span>
+                    <Toggle on={delivered} onChange={setDelivered} />
+                  </div>
+                )}
               </div>
 
               <div className="col-span-2 border-t border-line pt-4">

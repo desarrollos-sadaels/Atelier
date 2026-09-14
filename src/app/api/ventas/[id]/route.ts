@@ -120,6 +120,7 @@ export async function PATCH(
   // --- activa y sus prendas restantes todavía se entregan y se facturan.
   const liveFields =
     "delivered" in body ||
+    "preorder" in body ||
     "pos" in body ||
     "paymentMethod" in body ||
     "installments" in body ||
@@ -136,6 +137,13 @@ export async function PATCH(
   }
 
   if (typeof body.delivered === "boolean") patch.delivered = body.delivered;
+  // Marcar una compra como preventa la deja esperando mercadería, así que no
+  // puede quedar entregada — salvo que el mismo request diga otra cosa, que es
+  // el caso de "llegó y se la llevó" hecho de un saque desde el modal.
+  if (typeof body.preorder === "boolean") {
+    patch.preorder = body.preorder;
+    if (body.preorder && typeof body.delivered !== "boolean") patch.delivered = false;
+  }
   if ("pos" in body) patch.pos = str(body.pos);
   if ("paymentMethod" in body) patch.payment_method = str(body.paymentMethod);
   if ("installments" in body) {

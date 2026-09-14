@@ -421,6 +421,7 @@ export type Database = {
           origin: string
           payment_method: string | null
           pos: string | null
+          preorder: boolean
           sale_discount: number
           seller_id: string | null
           seller_name: string | null
@@ -446,6 +447,7 @@ export type Database = {
           origin?: string
           payment_method?: string | null
           pos?: string | null
+          preorder?: boolean
           sale_discount?: number
           seller_id?: string | null
           seller_name?: string | null
@@ -471,6 +473,7 @@ export type Database = {
           origin?: string
           payment_method?: string | null
           pos?: string | null
+          preorder?: boolean
           sale_discount?: number
           seller_id?: string | null
           seller_name?: string | null

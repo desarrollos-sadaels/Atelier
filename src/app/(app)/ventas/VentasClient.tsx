@@ -12,6 +12,8 @@ import type { Role } from "@/lib/roles";
 import type { PaymentMethod } from "@/lib/payments";
 import type { SaleItemRow, SaleWithItems, Seller } from "@/lib/queries";
 import {
+  DELIVERY_STATE_LABEL,
+  deliveryState,
   normalizeItemStatus,
   normalizeOrigin,
   saleItemNet,
@@ -33,7 +35,7 @@ const fmtARS = (n: number) => arsFmt.format(n);
 const dateFmt = new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "2-digit" });
 
 export type OriginFilter = SaleOrigin | "todos";
-export type StatusFilter = "active" | "returned" | "todos";
+export type StatusFilter = "active" | "preorder" | "returned" | "todos";
 
 const ORIGIN_FILTERS: { value: OriginFilter; label: string }[] = [
   { value: "todos", label: "Todas" },
@@ -43,6 +45,9 @@ const ORIGIN_FILTERS: { value: OriginFilter; label: string }[] = [
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "active", label: "Activas" },
+  // Las preventas que todavía deben mercadería. Es la lista que hay que mirar
+  // seguido: son compras cobradas con algo pendiente de entregar.
+  { value: "preorder", label: "Esperando entrega" },
   { value: "returned", label: "Con devolución" },
   { value: "todos", label: "Todas" },
 ];
@@ -379,6 +384,9 @@ function SaleRows({
   const total = saleTotal(sale, items);
   const units = active.reduce((s, i) => s + i.qty, 0);
   const fullyReturned = sale.status === "returned";
+  // "Entregado" / "Esperando entrega" (preventa) / "Pendiente". La regla vive en
+  // src/lib/sales.ts porque también la usa el modal de edición.
+  const delivery = deliveryState(sale);
   const saleDiscount = Number(sale.sale_discount) || 0;
 
   // El título de la fila: la primera prenda activa (o la primera a secas si
@@ -482,10 +490,14 @@ function SaleRows({
                 <button
                   onClick={() => onToggleFlag("delivered")}
                   disabled={busy || readOnly}
-                  title="Alternar entregado"
+                  title={
+                    delivery === "awaiting"
+                      ? "Llegó la prenda: marcar entregada"
+                      : "Alternar entregado"
+                  }
                 >
                   <Chip tone={sale.delivered ? "acc" : "default"}>
-                    {sale.delivered ? "Entregado" : "Pendiente"}
+                    {DELIVERY_STATE_LABEL[delivery]}
                   </Chip>
                 </button>
                 <button

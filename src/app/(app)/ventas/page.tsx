@@ -29,7 +29,7 @@ function shiftMonth(month: string, delta: number): string {
 }
 
 const ORIGINS: OriginFilter[] = ["todos", "atelier", "shopify"];
-const STATUSES: StatusFilter[] = ["todos", "active", "returned"];
+const STATUSES: StatusFilter[] = ["todos", "active", "preorder", "returned"];
 
 const MONTH_LABEL = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric" });
 
