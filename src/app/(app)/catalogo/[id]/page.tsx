@@ -53,6 +53,7 @@ export default async function ProductDetailPage({
   const specs: [string, string][] = [
     ["SKU", p.sku ?? "—"],
     ["Categoría", p.category ?? "—"],
+    ["Tipo", p.is_preorder ? "Pre-order" : "Stock regular"],
     ["Precio de venta", formatARS(p.price)],
     ["Costo", formatARS(p.cost)],
     ["Proveedor", p.provider ?? "—"],

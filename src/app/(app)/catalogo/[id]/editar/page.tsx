@@ -65,6 +65,7 @@ export default async function EditProductPage({
     vendor: p.provider ?? "",
     status: STATUS_ES[statusCanonical] ?? "Borrador",
     alertThreshold: String(p.alert_threshold),
+    isPreorder: p.is_preorder,
   };
 
   return (

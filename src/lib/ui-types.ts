@@ -13,4 +13,5 @@ export type UiProduct = {
   image: string | null;
   stockNum: number;
   alertThreshold: number;
+  isPreorder: boolean;
 };

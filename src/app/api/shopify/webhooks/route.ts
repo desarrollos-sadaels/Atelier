@@ -6,7 +6,9 @@ import { getProductIdByInventoryItem, getProductVariants } from "@/lib/shopify/i
 import {
   fetchOrder,
   importOrder,
+  recordShopifyRefund,
   type MatchedProduct,
+  type ShopifyRefundPayload,
   type ShopifyOrder,
 } from "@/lib/shopify/orders";
 import { notifyLowStock } from "@/lib/notify";
@@ -93,10 +95,13 @@ async function handleInventoryLevel(
  * una prenda de tres, y sin el estado completo de la orden no hay forma de
  * saber cuáles.
  */
-async function handleRefund(payload: { order_id?: number | string }, supa: Supa) {
+async function handleRefund(payload: ShopifyRefundPayload, supa: Supa) {
   if (payload.order_id == null) return;
   const order = await fetchOrder(payload.order_id);
-  if (order) await handleOrder(order, supa);
+  if (order) {
+    await handleOrder(order, supa);
+    await recordShopifyRefund(payload, supa);
+  }
 }
 
 export async function POST(request: Request) {

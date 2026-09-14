@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Field } from "@/components/forms";
 import { Dropdown } from "@/components/Dropdown";
 import { ColorSwatch } from "@/components/ColorSwatch";
+import { CatalogProductSearch } from "@/components/CatalogProductSearch";
 import { btnCls } from "@/components/ui";
 import type { PickerProduct } from "@/lib/queries";
 import { cn } from "@/lib/cn";
@@ -62,7 +63,6 @@ export function ProductPicker({
   onAdd: (item: ChosenItem) => void;
 }) {
   const [otherBrand, setOtherBrand] = useState(false);
-  const [search, setSearch] = useState("");
   const [product, setProduct] = useState<PickerProduct | null>(null);
   const [variants, setVariants] = useState<Variant[] | null>(null);
   const [loadingVariants, setLoadingVariants] = useState(false);
@@ -78,12 +78,6 @@ export function ProductPicker({
   const [qty, setQty] = useState("1");
   const [price, setPrice] = useState("");
   const [discount, setDiscount] = useState("0");
-
-  const results = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (!needle) return [];
-    return products.filter((p) => `${p.name} ${p.sku}`.toLowerCase().includes(needle)).slice(0, 6);
-  }, [products, search]);
 
   const colors = useMemo(
     () => [...new Set((variants ?? []).map((v) => v.color).filter(Boolean))] as string[],
@@ -112,7 +106,6 @@ export function ProductPicker({
 
   async function pickProduct(p: PickerProduct) {
     setProduct(p);
-    setSearch("");
     setColor(null);
     setTalle(null);
     setGenericLabel(null);
@@ -216,6 +209,7 @@ export function ProductPicker({
                 <div className="truncate text-[13px] font-medium">{product.name}</div>
                 <div className="mono text-[10px] text-mut">
                   {product.sku} · stock {product.stock}u · {arsFmt.format(product.price)}
+                  {product.isPreorder ? " · PRE-ORDER" : ""}
                 </div>
               </div>
               <button
@@ -227,34 +221,7 @@ export function ProductPicker({
               </button>
             </div>
           ) : (
-            <div className="relative">
-              <Field
-                label="BUSCAR EN EL CATÁLOGO"
-                placeholder="Nombre o SKU…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {results.length > 0 && (
-                <ul className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-line2 bg-bg p-1.5 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.18)]">
-                  {results.map((p) => (
-                    <li key={p.id}>
-                      <button
-                        type="button"
-                        onClick={() => pickProduct(p)}
-                        className="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left hover:bg-panel"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-[13px]">{p.name}</div>
-                          <div className="mono text-[10px] text-mut">
-                            {p.sku} · {p.stock}u · {arsFmt.format(p.price)}
-                          </div>
-                        </div>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <CatalogProductSearch products={products} onSelect={pickProduct} />
           )}
 
           {loadingVariants && <p className="mono mt-3 text-[11px] text-mut">Cargando variantes…</p>}

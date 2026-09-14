@@ -4,23 +4,10 @@ import { useState } from "react";
 import type { SalesDay } from "@/lib/queries";
 import { cn } from "@/lib/cn";
 
-/**
- * Ventas por día, apiladas por plataforma.
- *
- * Los dos colores son la única parte no obvia. La paleta de Atelier es
- * monocroma con un solo acento rojo, y "negro + rojo" no sirve para dos series:
- * el negro no tiene croma, así que en un apilado lee como "sombra" y no como
- * una categoría. Se validó el par contra los seis chequeos de color (banda de
- * luminosidad, piso de croma, separación con daltonismo, piso de visión normal
- * y contraste contra el fondo) y el ganador fue el acento de la marca más un
- * azul editorial. Un ocre —lo primero que uno probaría en una paleta cálida—
- * falla: contra el rojo queda a ΔE 4.9 en deuteranopía, o sea indistinguible.
- *
- * Y como el color nunca puede ser la única señal, cada serie va además con su
- * leyenda, su número en el tooltip y la tabla de datos.
- */
+/** Ventas por día, apiladas por canal y acompañadas por etiquetas numéricas. */
 const SERIES = [
   { key: "atelier" as const, label: "Atelier", color: "#e2342b" },
+  { key: "taller" as const, label: "Taller", color: "#16847b" },
   { key: "shopify" as const, label: "Shopify", color: "#33538f" },
 ];
 
@@ -46,9 +33,12 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
   const [showTable, setShowTable] = useState(false);
 
   const max = Math.max(...data.map((d) => d.total), 0);
-  const totalAtelier = data.reduce((s, d) => s + d.atelier, 0);
-  const totalShopify = data.reduce((s, d) => s + d.shopify, 0);
-  const total = totalAtelier + totalShopify;
+  const totals = {
+    atelier: data.reduce((sum, day) => sum + day.atelier, 0),
+    taller: data.reduce((sum, day) => sum + day.taller, 0),
+    shopify: data.reduce((sum, day) => sum + day.shopify, 0),
+  };
+  const total = totals.atelier + totals.taller + totals.shopify;
 
   if (!data.length || max === 0) {
     return (
@@ -56,7 +46,7 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
         <div className="text-center">
           <div className="font-serif text-[20px]">Sin ventas en los últimos 30 días</div>
           <p className="mono mt-2 text-[11px] text-mut">
-            Se puebla con las ventas del local y las de la tienda online
+            Se puebla con las ventas de Atelier, Taller y la tienda online
           </p>
         </div>
       </div>
@@ -81,7 +71,7 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
                   className="inline-block h-2 w-2 rounded-full"
                   style={{ background: s.color }}
                 />
-                {s.label} {arsFmt.format(s.key === "atelier" ? totalAtelier : totalShopify)}
+                {s.label} {arsFmt.format(totals[s.key])}
               </span>
             ))}
           </div>
@@ -103,6 +93,7 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
               <tr>
                 <th className="border-b border-line py-2 pr-3 font-normal">Día</th>
                 <th className="border-b border-line py-2 pr-3 text-right font-normal">Atelier</th>
+                <th className="border-b border-line py-2 pr-3 text-right font-normal">Taller</th>
                 <th className="border-b border-line py-2 pr-3 text-right font-normal">Shopify</th>
                 <th className="border-b border-line py-2 text-right font-normal">Total</th>
               </tr>
@@ -114,6 +105,7 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
                     {dayFmt.format(parseDay(d.day))}
                   </td>
                   <td className="py-1.5 pr-3 text-right">{arsFmt.format(d.atelier)}</td>
+                  <td className="py-1.5 pr-3 text-right">{arsFmt.format(d.taller)}</td>
                   <td className="py-1.5 pr-3 text-right">{arsFmt.format(d.shopify)}</td>
                   <td className="py-1.5 text-right font-medium">{arsFmt.format(d.total)}</td>
                 </tr>
@@ -167,15 +159,14 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
                 // El área de hover es la columna entera, no la barra: con
                 // montos chicos la barra mide 3px y sería imposible apuntarle.
                 // `flex-col-reverse` + `justify-start` apila desde el piso hacia
-                // arriba, con el primer hijo abajo. Es lo que hace que Atelier
-                // quede apoyado en la línea de base y Shopify encima.
+                // arriba, con el primer canal apoyado en la línea de base.
                 className="group relative flex h-full flex-1 flex-col-reverse justify-start"
                 onMouseEnter={() => setHover(i)}
                 onFocus={() => setHover(i)}
                 onBlur={() => setHover(null)}
                 aria-label={`${fullDayFmt.format(parseDay(d.day))}: ${arsFmt.format(
                   d.total,
-                )} — Atelier ${arsFmt.format(d.atelier)}, Shopify ${arsFmt.format(d.shopify)}`}
+                )} — Atelier ${arsFmt.format(d.atelier)}, Taller ${arsFmt.format(d.taller)}, Shopify ${arsFmt.format(d.shopify)}`}
               >
                 <span
                   aria-hidden
@@ -184,13 +175,14 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
                     hover === i ? "bg-panel" : "bg-transparent",
                   )}
                 />
-                {/* Apilado de abajo hacia arriba: Atelier al piso, Shopify
-                    encima, con 2px de fondo entre los dos para que se lean
-                    como dos segmentos y no como un degradé. */}
+                {/* Un corte de 2px separa los canales presentes en cada día. */}
                 {SERIES.map((s, si) => {
                   const value = d[s.key];
                   if (value <= 0) return null;
-                  const isTop = si === SERIES.length - 1 || d[SERIES[si + 1].key] <= 0;
+                  const hasLowerSegment = SERIES.slice(0, si).some(
+                    (lower) => d[lower.key] > 0,
+                  );
+                  const isTop = SERIES.slice(si + 1).every((upper) => d[upper.key] <= 0);
                   return (
                     <span
                       key={s.key}
@@ -199,7 +191,7 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
                       style={{
                         height: `${Math.max((value / max) * 100, 1.5)}%`,
                         background: s.color,
-                        marginBottom: si > 0 ? 2 : 0,
+                        marginBottom: hasLowerSegment ? 2 : 0,
                         opacity: hover === null || hover === i ? 1 : 0.35,
                       }}
                     />

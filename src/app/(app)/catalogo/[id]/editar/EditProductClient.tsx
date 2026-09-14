@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Card, CardTitle, Eyebrow, btnCls } from "@/components/ui";
-import { Field, Textarea } from "@/components/forms";
+import { Field, Textarea, ToggleRow } from "@/components/forms";
 import { Dropdown } from "@/components/Dropdown";
 import { ColorSwatch } from "@/components/ColorSwatch";
 import { CATEGORY_OPTIONS, CATEGORY_SELECT_DEFAULT } from "@/lib/categories";
@@ -20,6 +20,7 @@ export type EditInitial = {
   vendor: string;
   status: string;
   alertThreshold: string;
+  isPreorder: boolean;
 };
 
 export function EditProductClient({
@@ -42,6 +43,7 @@ export function EditProductClient({
   const [vendor, setVendor] = useState(initial.vendor);
   const [estado, setEstado] = useState(initial.status || "Borrador");
   const [alertThreshold, setAlertThreshold] = useState(initial.alertThreshold);
+  const [isPreorder, setIsPreorder] = useState(initial.isPreorder);
   const [saving, setSaving] = useState(false);
 
   async function save() {
@@ -60,6 +62,7 @@ export function EditProductClient({
           vendor: vendor.trim() || undefined,
           status: estado,
           alertThreshold: Number(alertThreshold) || 10,
+          isPreorder,
         }),
       });
       const data = await res.json();
@@ -149,6 +152,14 @@ export function EditProductClient({
                   type="number"
                   value={alertThreshold}
                   onChange={(e) => setAlertThreshold(e.target.value)}
+                />
+              </div>
+              <div className="mt-3 border-t border-line">
+                <ToggleRow
+                  title="Pre-order"
+                  sub="Etiqueta interna; no modifica el stock ni Shopify."
+                  on={isPreorder}
+                  onChange={setIsPreorder}
                 />
               </div>
             </div>

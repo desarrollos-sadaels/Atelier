@@ -8,13 +8,13 @@ import {
   getPaymentMethods,
   getSales,
   getSalesKpis,
+  getSaleMovements,
   getSellers,
   monthRange,
   formatARS,
   SALES_PAGE_SIZE,
 } from "@/lib/queries";
 import { uiRole } from "@/lib/roles";
-import type { SaleOrigin } from "@/lib/sales";
 import { VentasClient, type OriginFilter, type StatusFilter } from "./VentasClient";
 
 function currentMonth(): string {
@@ -28,7 +28,7 @@ function shiftMonth(month: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-const ORIGINS: OriginFilter[] = ["todos", "atelier", "shopify"];
+const ORIGINS: OriginFilter[] = ["todos", "atelier", "taller", "shopify"];
 const STATUSES: StatusFilter[] = ["todos", "active", "returned"];
 
 const MONTH_LABEL = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric" });
@@ -61,15 +61,16 @@ export default async function VentasPage({
 
   // Los KPIs salen de una agregación en la base sobre el mes completo, así que
   // no dependen ni de la página ni de los filtros activos.
-  const [profile, k, sales, sellers, paymentMethods] = await Promise.all([
+  const [profile, k, sales, movements, sellers, paymentMethods] = await Promise.all([
     getCurrentProfile(),
     getSalesKpis(start, end),
     getSales(start, end, {
       q: search,
       page,
-      origin: origin as SaleOrigin | "todos",
+      origin,
       status,
     }),
+    getSaleMovements(start, end),
     getSellers(),
     getPaymentMethods(),
   ]);
@@ -82,7 +83,7 @@ export default async function VentasPage({
     k.totalAmount > 0 ? Math.round((k.shopifyAmount / k.totalAmount) * 100) : 0;
 
   const kpis = [
-    { label: "Ventas del mes", value: formatARS(k.totalAmount), sub: "las dos plataformas" },
+    { label: "Ventas del mes", value: formatARS(k.totalAmount), sub: "Atelier, Taller y Shopify" },
     {
       label: "Tienda online",
       value: formatARS(k.shopifyAmount),
@@ -125,6 +126,7 @@ export default async function VentasPage({
 
       <VentasClient
         rows={sales.rows}
+        movements={movements}
         total={sales.total}
         page={page}
         pageSize={SALES_PAGE_SIZE}
