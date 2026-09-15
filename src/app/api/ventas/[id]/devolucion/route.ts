@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/api-auth";
 import { restockItem } from "@/lib/sales-ops";
+import { saleItemNet } from "@/lib/sales";
 
 function str(v: unknown): string | null {
   if (typeof v !== "string") return null;
@@ -18,8 +19,8 @@ function str(v: unknown): string | null {
  *
  * Las filas NO se borran. El botón Eliminar (DELETE) existe para el error de
  * carga —una venta que nunca ocurrió— y ahí borrar es lo correcto. Una
- * devolución es lo contrario: ocurrió, y el mes tiene que poder explicar por
- * qué cerró más bajo, con qué prenda y de qué vendedor.
+ * devolución es lo contrario: ocurrió, y el mes en que se devolvió el dinero
+ * tiene que mostrar el egreso, con qué prenda y de qué vendedor.
  *
  * El orden es a propósito: primero Shopify, después la base. Si la reposición
  * falla, `restockItem` lanza y esa prenda queda intacta y activa — que es el
@@ -58,7 +59,7 @@ export async function POST(
   const { data: sale, error: fetchErr } = await supaAdmin
     .from("sales")
     .select(
-      "id, seller_id, sale_items(id, article, qty, product_id, variant_gid, stock_deducted, status, exchange_of_item_id)",
+      "id, seller_id, seller_name, sale_discount, payment_method, sale_items(id, article, qty, price, discount, counts_revenue, product_id, variant_gid, stock_deducted, status, exchange_of_item_id)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -106,18 +107,48 @@ export async function POST(
       continue;
     }
 
+    // La venta conserva el ingreso en su mes original. El dinero devuelto es
+    // un egreso de hoy; en una prenda de cambio se usa el valor de esa prenda.
+    const refundAmount = item.counts_revenue || item.exchange_of_item_id
+      ? saleItemNet(item, sale.sale_discount)
+      : 0;
+    const sourceKey = `return:${item.id}`;
+    let movementInserted = false;
+    if (refundAmount > 0) {
+      const { error: movementError } = await supaAdmin.from("sale_movements").insert({
+        sale_id: id,
+        sale_item_id: item.id,
+        kind: "return",
+        amount: -refundAmount,
+        payment_method: sale.payment_method,
+        description: `Devolución de ${item.article}`,
+        created_by: auth.identity.userId,
+        source_key: sourceKey,
+      });
+      if (movementError && movementError.code !== "23505") {
+        failed.push({
+          article: item.article,
+          error: `no se pudo registrar el egreso (${movementError.message})`,
+        });
+        continue;
+      }
+      movementInserted = !movementError;
+    }
+
     const { error } = await supaAdmin
       .from("sale_items")
       .update({
         status: "returned",
-        // Deja de sumar al mes. La fila sobrevive para el reporte de devoluciones.
-        counts_revenue: false,
+        // `counts_revenue` no cambia: preserva el importe del mes original.
         returned_at: new Date().toISOString(),
         return_reason: reason,
       })
       .eq("id", item.id);
 
     if (error) {
+      if (movementInserted) {
+        await supaAdmin.from("sale_movements").delete().eq("source_key", sourceKey);
+      }
       failed.push({
         article: item.article,
         error:
@@ -127,22 +158,6 @@ export async function POST(
       continue;
     }
     returnedIds.push(item.id);
-
-    // Devolver la prenda de un cambio anula ese cambio: la original ya había
-    // vuelto al stock, así que el cliente no se quedó con nada. Su plata
-    // tampoco puede seguir contando.
-    if (item.exchange_of_item_id) {
-      await supaAdmin
-        .from("sale_items")
-        .update({
-          status: "returned",
-          counts_revenue: false,
-          exchange_adjustment: 0,
-          returned_at: new Date().toISOString(),
-          return_reason: reason ?? "Se devolvió la prenda del cambio",
-        })
-        .eq("id", item.exchange_of_item_id);
-    }
   }
 
   if (!returnedIds.length) {

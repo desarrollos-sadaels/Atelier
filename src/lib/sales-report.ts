@@ -229,7 +229,7 @@ export const WHOLESALE_POS = "MAYORISTAS";
 export const WORKSHOP_POS = "TALLER";
 
 /**
- * Canal de una compra. ESPEJO de `public.sale_channel` (migración 0020): la
+ * Canal de una compra. ESPEJO de `public.sale_channel` (migración 0024): la
  * base clasifica para los totales y esto para el CSV de detalle, así que si
  * cambia una, cambia la otra. El orden importa: una venta del taller sigue
  * siendo del taller aunque después le cambien el punto de venta.

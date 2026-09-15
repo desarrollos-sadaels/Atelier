@@ -1,7 +1,7 @@
 -- ============================================================
--- 0023 — sales_by_seller_channel: los cambios sin recorrer toda la tabla
+-- 0027 — sales_by_seller_channel: los cambios sin recorrer toda la tabla
 --
--- En la 0021 los cambios se contaban partiendo de CADA prenda y buscando, con
+-- En la 0025 los cambios se contaban partiendo de CADA prenda y buscando, con
 -- un `join lateral`, si tenía reemplazos. Ese lateral corría para todas las
 -- filas de `sale_items`, de toda la historia, cada vez que se abría el reporte:
 -- con 70 prendas no se nota; con un año de operación es un escaneo completo
@@ -14,7 +14,7 @@
 -- anterior antes de aplicarla.
 --
 -- Nada más cambia: misma firma, misma plata (espejo de `sales_kpis`), mismos
--- criterios de devolución y de cambio que documenta la 0021.
+-- criterios de devolución y de cambio que documenta la 0025.
 -- ============================================================
 
 create or replace function public.sales_by_seller_channel(p_start date, p_end date)
@@ -134,7 +134,7 @@ as $$
   order by 4 desc;
 $$;
 
--- `create or replace` conserva los permisos de la 0021; se repiten para que un
+-- `create or replace` conserva los permisos de la 0025; se repiten para que un
 -- entorno levantado desde el repo quede igual aunque se corra suelta.
 revoke execute on function public.sales_by_seller_channel(date, date) from public, anon;
 grant execute on function public.sales_by_seller_channel(date, date) to authenticated;

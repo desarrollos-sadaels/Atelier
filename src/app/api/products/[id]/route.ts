@@ -74,6 +74,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         provider: vendor,
         shopify_status: status.toLowerCase(),
         alert_threshold: alertThreshold,
+        is_preorder: body.isPreorder === true,
         updated_at: new Date().toISOString(),
       })
       .eq("id", product.id);

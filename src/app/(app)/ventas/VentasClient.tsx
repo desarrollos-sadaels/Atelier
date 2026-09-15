@@ -10,7 +10,7 @@ import { Chevron, Dots } from "@/components/icons";
 import { ColorSwatch } from "@/components/ColorSwatch";
 import type { Role } from "@/lib/roles";
 import type { PaymentMethod } from "@/lib/payments";
-import type { SaleItemRow, SaleWithItems, Seller } from "@/lib/queries";
+import type { SaleItemRow, SaleMovementListItem, SaleWithItems, Seller } from "@/lib/queries";
 import {
   DELIVERY_STATE_LABEL,
   deliveryState,
@@ -34,12 +34,13 @@ const fmtARS = (n: number) => arsFmt.format(n);
 
 const dateFmt = new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "2-digit" });
 
-export type OriginFilter = SaleOrigin | "todos";
+export type OriginFilter = SaleOrigin | "taller" | "todos";
 export type StatusFilter = "active" | "preorder" | "returned" | "todos";
 
 const ORIGIN_FILTERS: { value: OriginFilter; label: string }[] = [
   { value: "todos", label: "Todas" },
   { value: "atelier", label: "Atelier" },
+  { value: "taller", label: "Taller" },
   { value: "shopify", label: "Shopify" },
 ];
 
@@ -59,6 +60,7 @@ type Modal =
 
 export function VentasClient({
   rows,
+  movements,
   total,
   page,
   pageSize,
@@ -75,6 +77,7 @@ export function VentasClient({
   currentUserId,
 }: {
   rows: SaleWithItems[];
+  movements: SaleMovementListItem[];
   total: number;
   page: number;
   pageSize: number;
@@ -214,11 +217,11 @@ export function VentasClient({
         </span>
       </div>
 
-      {/* Origen y estado. Son dos ejes distintos: de qué plataforma vino la
+      {/* Origen y estado. Son dos ejes distintos: de qué canal vino la
           compra, y qué pasó con su mercadería. */}
       <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
         <FilterGroup
-          label="Plataforma"
+          label="Canal"
           options={ORIGIN_FILTERS}
           value={origin}
           hrefFor={(v) => hrefFor({ origin: v, page: 1 })}
@@ -239,7 +242,7 @@ export function VentasClient({
           <p className="mono mt-2 text-[12px] text-mut">
             {noResults
               ? "Probá con otra búsqueda o cambiá los filtros."
-              : "Acá aparecen las ventas del local y las de la tienda online."}
+              : "Acá aparecen las ventas de Atelier, Taller y la tienda online."}
           </p>
           {!readOnly && !query && (
             <Link href="/ventas/nueva" className={btnCls("primary", "mt-5")}>
@@ -312,6 +315,8 @@ export function VentasClient({
         </div>
       )}
 
+      {movements.length > 0 && <MovementsTable rows={movements} />}
+
       {/* Los modales se montan con `key` para que su estado interno arranque
           limpio al pasar de una compra a otra. */}
       {modal?.kind === "editar" && (
@@ -340,6 +345,53 @@ export function VentasClient({
         />
       )}
     </>
+  );
+}
+
+function MovementsTable({ rows }: { rows: SaleMovementListItem[] }) {
+  return (
+    <div className="mt-10">
+      <div className="mono mb-3 text-[11px] text-mut">MOVIMIENTOS DEL MES</div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] border-t border-line text-left">
+          <thead>
+            <tr className="mono text-[10px] text-mut">
+              {["Fecha", "Movimiento", "Venta", "Cliente", "Pago", "Importe"].map((heading) => (
+                <th key={heading} className="border-b border-line py-3 pr-4 font-normal">
+                  {heading}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((movement) => (
+              <tr key={movement.id} className="border-b border-line hover:bg-panel/60">
+                <td className="mono py-3 pr-4 text-[11px] text-mut">
+                  {new Date(movement.occurredAt).toLocaleDateString("es-AR")}
+                </td>
+                <td className="py-3 pr-4 text-[13px]">
+                  <div>{movement.kind === "return" ? "Devolución" : "Diferencia por cambio"}</div>
+                  <div className="mono text-[9px] text-mut2">
+                    {movement.itemArticle ?? movement.description ?? "—"}
+                  </div>
+                </td>
+                <td className="mono py-3 pr-4 text-[11px]">
+                  {movement.saleLabel ?? `Venta ${movement.saleId.slice(0, 8)}`}
+                </td>
+                <td className="py-3 pr-4 text-[13px]">{movement.customerName ?? "—"}</td>
+                <td className="mono py-3 pr-4 text-[11px]">{movement.paymentMethod ?? "—"}</td>
+                <td className={cn(
+                  "py-3 text-right font-serif text-[17px]",
+                  movement.amount < 0 && "text-acc",
+                )}>
+                  {movement.amount > 0 ? "+" : "−"}{fmtARS(Math.abs(movement.amount))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -388,6 +440,9 @@ function SaleRows({
   // src/lib/sales.ts porque también la usa el modal de edición.
   const delivery = deliveryState(sale);
   const saleDiscount = Number(sale.sale_discount) || 0;
+  const workshopSale = Boolean(
+    sale.workshop_order_id || sale.idempotency_key?.startsWith("workshop:"),
+  );
 
   // El título de la fila: la primera prenda activa (o la primera a secas si
   // está todo devuelto), y el resto como recuento.
@@ -439,7 +494,9 @@ function SaleRows({
                   `${units}u`,
                   lead?.talle && `Talle ${lead.talle}`,
                   sale.shopify_order_name,
+                  workshopSale && "Pedido de Taller",
                   saleDiscount > 0 && `-${Math.round(saleDiscount * 100)}% compra`,
+                  Number(sale.shipping_amount) > 0 && `Envío ${fmtARS(Number(sale.shipping_amount))}`,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -459,7 +516,7 @@ function SaleRows({
         <td className="mono py-3 pr-4 align-top text-[11px]">
           <div>{sale.pos ?? "—"}</div>
           <div className="text-[9px] uppercase text-mut2">
-            {origin === "shopify" ? "Shopify" : "Atelier"}
+            {workshopSale ? "Taller" : origin === "shopify" ? "Shopify" : "Atelier"}
           </div>
         </td>
         <td className="mono py-3 pr-4 align-top text-[11px]">
@@ -472,7 +529,7 @@ function SaleRows({
           ) : null}
         </td>
         <td className="py-3 pr-4 align-top">
-          <div className={cn("font-serif text-[17px]", fullyReturned && "text-mut line-through")}>
+          <div className="font-serif text-[17px]">
             {fmtARS(total)}
           </div>
           {returned.length > 0 && !fullyReturned && (
@@ -569,7 +626,7 @@ function SaleRows({
                       }}
                     />
                   )}
-                  {role === "admin" && (
+                  {role === "admin" && !workshopSale && (
                     <MenuItem
                       label="Eliminar"
                       hint="Error de carga"
@@ -654,10 +711,18 @@ function SaleRows({
                     <span
                       className="flex items-center gap-1"
                       title={
-                        item.stock_deducted ? "Stock descontado en Shopify" : "No descuenta stock"
+                        item.stock_deducted
+                          ? "Stock descontado en Shopify"
+                          : workshopSale
+                            ? "Pedido de Taller: no descuenta stock"
+                            : "No descuenta stock"
                       }
                     >
-                      <Dot alert={!item.stock_deducted && !item.is_other_brand} />
+                      <Dot
+                        alert={
+                          !item.stock_deducted && !item.is_other_brand && !workshopSale
+                        }
+                      />
                     </span>
                   )}
                 </div>

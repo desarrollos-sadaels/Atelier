@@ -88,6 +88,7 @@ export function EditarVentaModal({
   const [saleDiscount, setSaleDiscount] = useState(
     String(Math.round(Number(sale.sale_discount) * 100)),
   );
+  const [shippingAmount, setShippingAmount] = useState(String(Number(sale.shipping_amount) || 0));
   const [saving, setSaving] = useState(false);
 
   const selectedMethod = paymentMethods.find((m) => m.name === pago) ?? null;
@@ -147,6 +148,11 @@ export function EditarVentaModal({
         const discountNum = (Number(saleDiscount) || 0) / 100;
         if (discountNum < 0 || discountNum >= 1) throw new Error("Descuento inválido (0–99%)");
         if (discountNum !== Number(sale.sale_discount)) body.saleDiscount = discountNum;
+      }
+      if (origin === "atelier") {
+        const shipping = Number(shippingAmount) || 0;
+        if (!Number.isFinite(shipping) || shipping < 0) throw new Error("Costo de envío inválido");
+        if (shipping !== Number(sale.shipping_amount)) body.shippingAmount = shipping;
       }
 
       const res = await fetch(`/api/ventas/${sale.id}`, {
@@ -237,19 +243,25 @@ export function EditarVentaModal({
           )}
         </div>
 
-        {canEditDiscount && (
+        {origin === "atelier" && (
           <div className="grid grid-cols-2 gap-4">
+            {canEditDiscount && (
+              <Field
+                label="DESCUENTO GENERAL %"
+                type="number"
+                min={0}
+                max={99}
+                value={saleDiscount}
+                onChange={(e) => setSaleDiscount(e.target.value)}
+              />
+            )}
             <Field
-              label="DESCUENTO GENERAL %"
+              label="COSTO DE ENVÍO"
               type="number"
               min={0}
-              max={99}
-              value={saleDiscount}
-              onChange={(e) => setSaleDiscount(e.target.value)}
+              value={shippingAmount}
+              onChange={(e) => setShippingAmount(e.target.value)}
             />
-            <p className="mono self-end pb-3 text-[10px] leading-relaxed text-mut">
-              Se aplica sobre toda la compra, encima del descuento de cada prenda.
-            </p>
           </div>
         )}
         {role === "admin" && origin === "shopify" && (

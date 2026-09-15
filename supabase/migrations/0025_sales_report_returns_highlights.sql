@@ -1,5 +1,5 @@
 -- ============================================================
--- 0021 — Reporte de ventas: cambios/devoluciones reales y destacados
+-- 0025 — Reporte de ventas: cambios/devoluciones reales y destacados
 --
 -- Dos cosas:
 --
@@ -22,15 +22,17 @@
 -- es del 2/9):
 --
 --   Devolución — prenda con `status = 'returned'` y `returned_at` en el rango.
---                Devolver la prenda de un cambio también marca la ORIGINAL como
---                devuelta (ver /api/ventas/[id]/devolucion): la original se
---                excluye para no contar dos devoluciones por una.
+--                Antes de Taller, devolver la prenda de un cambio también
+--                marcaba la ORIGINAL como devuelta: la original se excluye para
+--                no contar dos devoluciones por una. Desde Taller la API ya no
+--                toca la original, así que la exclusión solo alcanza a las
+--                devoluciones anteriores.
 --   Cambio     — prenda original con reemplazos; la fecha es la del primer
 --                reemplazo creado. Cuenta aunque después devuelvan el reemplazo:
 --                el cambio ocurrió.
 --
--- Depende, como la 0020, de `sale_movements`, `sales.shipping_amount` y
--- `sales.workshop_order_id`, que existen en producción sin migración en el repo.
+-- Depende, como la 0024, de `sale_movements`, `sales.shipping_amount` y
+-- `sales.workshop_order_id` (0019 y 0021, Taller).
 -- ============================================================
 
 -- Cambia el tipo de retorno: `create or replace` no alcanza.

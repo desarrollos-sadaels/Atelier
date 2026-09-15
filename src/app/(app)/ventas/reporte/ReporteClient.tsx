@@ -225,7 +225,7 @@ export function ReporteClient({
           <Card className="mt-6">
             <EmptyState title="No se pudo calcular el reporte">
               {/sales_by_seller_channel|sale_channel|returned_units|exchanged_/i.test(error)
-                ? "Falta aplicar la migración 0021 (cambios, devoluciones y destacados) en la base."
+                ? "Falta aplicar la migración 0025 (cambios, devoluciones y destacados) en la base."
                 : error}
             </EmptyState>
           </Card>

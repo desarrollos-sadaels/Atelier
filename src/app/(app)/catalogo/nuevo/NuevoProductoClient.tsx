@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Card, CardTitle, Eyebrow, btnCls } from "@/components/ui";
-import { Field, Textarea } from "@/components/forms";
+import { Field, Textarea, ToggleRow } from "@/components/forms";
 import { Dropdown } from "@/components/Dropdown";
 import { ColorSwatch } from "@/components/ColorSwatch";
 import { X } from "@/components/icons";
@@ -57,6 +57,7 @@ export function NuevoProductoClient({ campaigns }: { campaigns: MetaCampaignOpti
   const [barcode, setBarcode] = useState("");
   const [alertThreshold, setAlertThreshold] = useState("10");
   const [estado, setEstado] = useState("Borrador");
+  const [isPreorder, setIsPreorder] = useState(false);
   const [campaign, setCampaign] = useState(NO_CAMPAIGN);
 
   const [talles, setTalles] = useState<string[]>(["S", "M", "L"]);
@@ -149,6 +150,7 @@ export function NuevoProductoClient({ campaigns }: { campaigns: MetaCampaignOpti
           sku: sku.trim() || undefined,
           barcode: barcode.trim() || undefined,
           alertThreshold: Number(alertThreshold) || 10,
+          isPreorder,
           options,
           variants,
           stock: Number(singleStock) || 0,
@@ -321,6 +323,14 @@ export function NuevoProductoClient({ campaigns }: { campaigns: MetaCampaignOpti
             <CardTitle>Publicación</CardTitle>
             <div className="px-6 pb-6 pt-3">
               <Dropdown label="ESTADO" value={estado} options={ESTADOS} onChange={setEstado} />
+              <div className="mt-3 border-t border-line">
+                <ToggleRow
+                  title="Pre-order"
+                  sub="Etiqueta interna; no modifica el stock ni Shopify."
+                  on={isPreorder}
+                  onChange={setIsPreorder}
+                />
+              </div>
               <p className="mt-3 text-[11px] text-mut">
                 {estado === "Activo"
                   ? "Se publica visible en la tienda online."

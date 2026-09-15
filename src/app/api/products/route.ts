@@ -120,6 +120,7 @@ export async function POST(req: NextRequest) {
           provider: vendor,
           shopify_status: (product.status || status).toLowerCase(),
           alert_threshold: alertThreshold,
+          is_preorder: body.isPreorder === true,
           image_url: imageUrls[0] ?? product.featuredMedia?.preview?.image?.url ?? null,
           images: imageUrls,
           updated_at: new Date().toISOString(),

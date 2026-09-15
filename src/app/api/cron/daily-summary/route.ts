@@ -3,7 +3,6 @@ import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { parseNotificationSettings } from "@/lib/notifications";
 import { resolveRecipients } from "@/lib/notify";
 import { isEmailConfigured, sendEmail, emailShell, escapeHtml } from "@/lib/email";
-import { saleItemRevenue, saleItemNet } from "@/lib/sales";
 import { allowsInsecureLocalFallback } from "@/lib/env";
 import { hasValidSecret } from "@/lib/secrets";
 
@@ -47,6 +46,12 @@ function summaryDayART(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).format(yesterday);
 }
 
+function nextDay(day: string): string {
+  const date = new Date(`${day}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
 async function buildAndSend() {
   const supa = createAdminClient();
 
@@ -58,6 +63,11 @@ async function buildAndSend() {
   const settings = parseNotificationSettings(settingRow?.value);
 
   const day = summaryDayART();
+  const { data: kpiRows } = await supa.rpc("sales_kpis", {
+    p_start: day,
+    p_end: nextDay(day),
+  });
+  const kpi = kpiRows?.[0];
 
   // Una compra con sus prendas: la plata sale de las prendas, el conteo de
   // operaciones de las compras. Antes eran la misma fila y por eso una compra
@@ -71,15 +81,14 @@ async function buildAndSend() {
   const lines = rows.flatMap((s) =>
     (s.sale_items ?? []).map((i) => ({ ...i, sale: s })),
   );
-  const live = rows.filter((s) => (s.sale_items ?? []).some((i) => i.status === "active"));
-  const totalAmount = lines.reduce((acc, l) => acc + saleItemRevenue(l, l.sale.sale_discount), 0);
-  const shopifyAmount = lines
-    .filter((l) => l.sale.origin === "shopify")
-    .reduce((acc, l) => acc + saleItemRevenue(l, l.sale.sale_discount), 0);
-  const units = lines.reduce((acc, l) => (l.status === "active" ? acc + l.qty : acc), 0);
-  const pendingDelivery = live.filter((s) => !s.delivered).length;
-  const returned = lines.filter((l) => l.status === "returned");
-  const returnedAmount = returned.reduce((acc, l) => acc + saleItemNet(l, l.sale.sale_discount), 0);
+  const totalAmount = Number(kpi?.total_amount) || 0;
+  const workshopAmount = Number(kpi?.workshop_amount) || 0;
+  const shopifyAmount = Number(kpi?.shopify_amount) || 0;
+  const units = Number(kpi?.units) || 0;
+  const operations = Number(kpi?.operations) || 0;
+  const pendingDelivery = Number(kpi?.pending_delivery) || 0;
+  const returned = Number(kpi?.returned_count) || 0;
+  const returnedAmount = Number(kpi?.returned_amount) || 0;
 
   const { data: products = [] } = await supa
     .from("products")
@@ -107,9 +116,10 @@ async function buildAndSend() {
     const html = emailShell(
       `Resumen diario · ${day}`,
       `<div style="font-size:14px;line-height:1.6">
-        <p><strong>Ventas de hoy:</strong> ${live.length} operaciones · ${units} unidades · ${ars.format(totalAmount)}<br/>
+        <p><strong>Ventas de hoy:</strong> ${operations} operaciones · ${units} unidades · ${ars.format(totalAmount)}<br/>
+        <strong>De Taller:</strong> ${ars.format(workshopAmount)}<br/>
         <strong>De la tienda online:</strong> ${ars.format(shopifyAmount)}<br/>
-        <strong>Entregas pendientes:</strong> ${pendingDelivery}${returned.length ? `<br/><strong>Devoluciones:</strong> ${returned.length} prendas · ${ars.format(returnedAmount)}` : ""}</p>
+        <strong>Entregas pendientes:</strong> ${pendingDelivery}${returned ? `<br/><strong>Devoluciones:</strong> ${returned} prendas · ${ars.format(returnedAmount)}` : ""}</p>
         <p style="font-weight:600;margin-top:16px">Stock bajo / sin stock</p>
         <table style="border-collapse:collapse;width:100%;font-size:13px;border-top:1px solid #eee">${lowRows}</table>
       </div>`,
@@ -121,12 +131,13 @@ async function buildAndSend() {
   return {
     ok: true,
     day,
-    sales: live.length,
+    sales: operations,
     items: lines.length,
     units,
     totalAmount,
+    workshopAmount,
     shopifyAmount,
-    returned: returned.length,
+    returned,
     lowStock: lowStock.length,
     emailSkipped: skipped,
     recipients: recipients.length,

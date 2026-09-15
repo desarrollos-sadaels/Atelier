@@ -98,7 +98,7 @@ export function Popover({
             ref={panelRef}
             style={{ position: "fixed", top: coords.top, left: coords.left, right: coords.right }}
             className={cn(
-              "animate-pop z-[100] rounded-[6px] border border-line2 bg-bg shadow-[0_12px_40px_-12px_rgba(0,0,0,0.18)]",
+              "animate-pop z-[300] rounded-[6px] border border-line2 bg-bg shadow-[0_12px_40px_-12px_rgba(0,0,0,0.18)]",
               align === "right" ? "origin-top-right" : "origin-top-left",
               panelClass,
             )}

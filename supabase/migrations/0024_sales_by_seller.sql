@@ -1,5 +1,5 @@
 -- ============================================================
--- 0020 — Reporte de ventas: por vendedor y por canal
+-- 0024 — Reporte de ventas: por vendedor y por canal
 --
 -- El reporte necesita la misma plata que muestran los KPIs, abierta por quién
 -- tiene cada compra a su nombre y por el canal por el que entró. Se agrega en
@@ -10,13 +10,11 @@
 -- consulta la app arma el resumen por canal, el ranking por vendedor y el
 -- resumen de un empleado, sin una función por vista.
 --
--- La fórmula es un ESPEJO de `sales_kpis` tal como está hoy en producción, no
--- de la versión de la 0018. Ojo con esto: la función viva además suma
--- `sales.shipping_amount` y los movimientos de `sale_movements`, y ninguna de
--- esas dos cosas existe en este repo — se crearon en la base por fuera de las
--- migraciones (junto con `workshop_orders` y su trigger). Esta migración
--- depende de ellas, así que un entorno levantado solo desde el repo la rechaza
--- hasta que ese DDL tenga su archivo.
+-- La fórmula es un ESPEJO de `sales_kpis` tal como estaba en producción, no de
+-- la versión de la 0018: la función viva además suma `sales.shipping_amount` y
+-- los movimientos de `sale_movements`. Cuando se escribió, ese DDL (junto con
+-- `workshop_orders` y su trigger) existía en la base sin archivo en el repo;
+-- ahora lo traen la 0019 y la 0021 (Taller), que corren antes que esta.
 --
 -- Invariante que la hace confiable: la suma de TODAS las filas es, columna por
 -- columna, lo que devuelve `sales_kpis` para el mismo rango. Si una de las dos

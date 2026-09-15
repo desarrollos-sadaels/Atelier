@@ -1,6 +1,7 @@
 import { shopifyAdmin, shopifyAdminPage } from "./client";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import type { TablesInsert } from "@/lib/supabase/types";
+import { saleTotal } from "@/lib/sales";
 
 type Supa = ReturnType<typeof createAdminClient>;
 
@@ -40,6 +41,21 @@ type RefundLineItem = {
   restock_type?: string | null;
 };
 
+export type ShopifyRefundPayload = {
+  id?: number | string | null;
+  order_id?: number | string | null;
+  created_at?: string | null;
+  refund_line_items?: RefundLineItem[] | null;
+  transactions?: {
+    id?: number | string | null;
+    kind?: string | null;
+    status?: string | null;
+    amount?: string | number | null;
+    gateway?: string | null;
+    processed_at?: string | null;
+  }[] | null;
+};
+
 export type ShopifyOrder = {
   id: number | string;
   name?: string | null;
@@ -50,6 +66,7 @@ export type ShopifyOrder = {
   financial_status?: string | null;
   fulfillment_status?: string | null;
   currency?: string | null;
+  total_price?: string | number | null;
   note?: string | null;
   gateway?: string | null;
   payment_gateway_names?: string[] | null;
@@ -72,7 +89,10 @@ export type ShopifyOrder = {
   } | null;
   billing_address?: { name?: string | null } | null;
   line_items?: ShopifyOrderLineItem[] | null;
-  refunds?: { refund_line_items?: RefundLineItem[] | null }[] | null;
+  refunds?: ShopifyRefundPayload[] | null;
+  total_shipping_price_set?: {
+    shop_money?: { amount?: string | number | null } | null;
+  } | null;
 };
 
 const PRODUCT_FIELDS = "id, shopify_id, name, alert_threshold";
@@ -129,6 +149,11 @@ function soldAtART(iso: string | null | undefined): string {
 function num(v: unknown): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** Envío original informado por Shopify, expresado en la moneda de la tienda. */
+export function shippingAmountOf(order: ShopifyOrder): number {
+  return Math.max(0, num(order.total_shipping_price_set?.shop_money?.amount));
 }
 
 function clean(v: unknown): string | null {
@@ -264,6 +289,7 @@ export async function mapOrder(order: ShopifyOrder, supa: Supa): Promise<MappedO
     payment_method: paymentMethodOf(order),
     pos: "SHOPIFY",
     sale_discount: 0,
+    shipping_amount: shippingAmountOf(order),
     invoiced: false,
     delivered: fulfilled,
     notes: clean(order.note),
@@ -436,6 +462,208 @@ export type SyncOrdersResult = {
 
 /** Cuántos días de historial trae el backfill por defecto. */
 export const ORDERS_BACKFILL_DAYS = 90;
+
+export type ShippingCorrection = {
+  orderId: string;
+  orderName: string | null;
+  productTotal: number;
+  currentShipping: number;
+  shopifyShipping: number;
+  currentTotal: number;
+  expectedTotal: number;
+  shopifyOrderTotal: number | null;
+  matchesShopifyOrderTotal: boolean | null;
+};
+
+/**
+ * Vista previa de envíos históricos que difieren de Shopify.
+ * Es deliberadamente read-only: corregirlos requiere mandar los ids elegidos
+ * al endpoint explícito de correcciones.
+ */
+export async function previewShippingCorrections(
+  supa: Supa,
+  opts: { days?: number } = {},
+): Promise<ShippingCorrection[]> {
+  const days = Math.max(1, Math.min(365, Math.trunc(opts.days ?? ORDERS_BACKFILL_DAYS)));
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  let path: string | null =
+    `orders.json?status=any&limit=250&created_at_min=${encodeURIComponent(since)}`;
+  const orders: ShopifyOrder[] = [];
+
+  while (path) {
+    const page: { data: { orders?: ShopifyOrder[] }; next: string | null } =
+      await shopifyAdminPage<{ orders?: ShopifyOrder[] }>(path);
+    orders.push(...(page.data.orders ?? []));
+    path = page.next;
+  }
+
+  const byId = new Map(orders.map((order) => [String(order.id), order]));
+  const local = new Map<
+    string,
+    {
+      shipping_amount: number;
+      sale_discount: number;
+      sale_items: {
+        price: number;
+        discount: number;
+        qty: number;
+        counts_revenue: boolean;
+        exchange_adjustment: number;
+      }[];
+    }
+  >();
+
+  const ids = [...byId.keys()];
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const { data, error } = await supa
+      .from("sales")
+      .select(
+        "shopify_order_id, shipping_amount, sale_discount, sale_items(price, discount, qty, counts_revenue, exchange_adjustment)",
+      )
+      .in("shopify_order_id", ids.slice(offset, offset + 100));
+    if (error) throw new Error(`No se pudo comparar el envío: ${error.message}`);
+    for (const row of data ?? []) {
+      if (row.shopify_order_id) local.set(row.shopify_order_id, row);
+    }
+  }
+
+  const corrections: ShippingCorrection[] = [];
+  for (const [orderId, order] of byId) {
+    const sale = local.get(orderId);
+    if (!sale) continue;
+    const currentShipping = Number(sale.shipping_amount) || 0;
+    const shopifyShipping = shippingAmountOf(order);
+    if (Math.abs(currentShipping - shopifyShipping) < 0.005) continue;
+    const currentTotal = saleTotal(sale, sale.sale_items ?? []);
+    const productTotal = currentTotal - currentShipping;
+    const rawOrderTotal = order.total_price == null ? null : Number(order.total_price);
+    const shopifyOrderTotal = rawOrderTotal !== null && Number.isFinite(rawOrderTotal)
+      ? rawOrderTotal
+      : null;
+    const expectedTotal = productTotal + shopifyShipping;
+    corrections.push({
+      orderId,
+      orderName: clean(order.name) ?? null,
+      productTotal,
+      currentShipping,
+      shopifyShipping,
+      currentTotal,
+      expectedTotal,
+      shopifyOrderTotal,
+      matchesShopifyOrderTotal:
+        shopifyOrderTotal === null ? null : Math.abs(expectedTotal - shopifyOrderTotal) < 0.005,
+    });
+  }
+
+  return corrections.sort((a, b) => (b.orderName ?? "").localeCompare(a.orderName ?? ""));
+}
+
+/** Corrige únicamente los ids aprobados, releyendo el importe desde Shopify. */
+export async function applyShippingCorrections(
+  supa: Supa,
+  orderIds: string[],
+): Promise<{ orderId: string; shippingAmount: number }[]> {
+  const applied: { orderId: string; shippingAmount: number }[] = [];
+  for (const orderId of orderIds) {
+    const order = await fetchOrder(orderId);
+    if (!order) throw new Error(`Orden Shopify ${orderId} inexistente`);
+    const shippingAmount = shippingAmountOf(order);
+    const { data, error } = await supa
+      .from("sales")
+      .update({ shipping_amount: shippingAmount })
+      .eq("shopify_order_id", orderId)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(`No se pudo corregir ${order.name ?? orderId}: ${error.message}`);
+    if (!data) throw new Error(`La orden ${order.name ?? orderId} todavía no está importada`);
+    applied.push({ orderId, shippingAmount });
+  }
+  return applied;
+}
+
+/**
+ * Registra el dinero efectivamente reembolsado por Shopify con la fecha de la
+ * transacción. Se llama desde `refunds/create`: el backfill histórico no crea
+ * movimientos silenciosamente.
+ */
+export async function recordShopifyRefund(
+  refund: ShopifyRefundPayload,
+  supa: Supa,
+): Promise<number> {
+  if (refund.order_id == null || refund.id == null) return 0;
+
+  const { data: sale, error: saleError } = await supa
+    .from("sales")
+    .select("id, shopify_order_name, payment_method")
+    .eq("shopify_order_id", String(refund.order_id))
+    .maybeSingle();
+  if (saleError) throw new Error(`No se pudo ubicar el reembolso: ${saleError.message}`);
+  if (!sale) return 0;
+
+  const lineIds = (refund.refund_line_items ?? [])
+    .map((line) => line.line_item_id)
+    .filter((lineId): lineId is string | number => lineId != null)
+    .map(String);
+  const { data: localItems, error: itemsError } = lineIds.length
+    ? await supa
+        .from("sale_items")
+        .select("id")
+        .eq("sale_id", sale.id)
+        .in("shopify_line_item_id", lineIds)
+    : { data: [], error: null };
+  if (itemsError) {
+    throw new Error(`No se pudieron ubicar las prendas reembolsadas: ${itemsError.message}`);
+  }
+
+  const successful = (refund.transactions ?? []).filter((transaction) => {
+    const status = transaction.status?.toLowerCase();
+    return (
+      transaction.kind?.toLowerCase() === "refund"
+      && status === "success"
+      && num(transaction.amount) > 0
+    );
+  });
+  if (!successful.length) return 0;
+
+  const linkedItemId = localItems?.length === 1 ? localItems[0].id : null;
+  let inserted = 0;
+  for (const transaction of successful) {
+    if (transaction.id == null) continue;
+    const { data, error } = await supa
+      .from("sale_movements")
+      .upsert(
+        {
+          sale_id: sale.id,
+          sale_item_id: linkedItemId,
+          kind: "return",
+          amount: -num(transaction.amount),
+          payment_method: clean(transaction.gateway) ?? sale.payment_method,
+          description: `Reembolso Shopify ${sale.shopify_order_name ?? ""}`.trim(),
+          occurred_at: transaction.processed_at ?? refund.created_at ?? new Date().toISOString(),
+          source_key: `shopify-refund:${refund.id}:${transaction.id}`,
+        },
+        { onConflict: "source_key", ignoreDuplicates: true },
+      )
+      .select("id");
+    if (error) throw new Error(`No se pudo registrar el reembolso: ${error.message}`);
+    inserted += data?.length ?? 0;
+  }
+
+  // `importOrder` mantiene la compatibilidad de los reembolsos históricos
+  // poniendo la línea en false. Una vez guardado el egreso fechado por el
+  // webhook, la base original debe contar otra vez en el mes de la venta.
+  if (localItems?.length) {
+    const { error } = await supa
+      .from("sale_items")
+      .update({ counts_revenue: true })
+      .in("id", localItems.map((item) => item.id));
+    if (error) {
+      throw new Error(`El reembolso se guardó pero no se preservó la venta original: ${error.message}`);
+    }
+  }
+
+  return inserted;
+}
 
 /**
  * Reimporta las órdenes de los últimos `days` días.

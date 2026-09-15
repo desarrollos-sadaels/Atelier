@@ -1,5 +1,9 @@
 -- ============================================================
--- 0019 — Preventa: la compra existe antes que la prenda
+-- 0023 — Preventa: la compra existe antes que la prenda
+--
+-- No confundir con `products.is_preorder` (0019): esa es una etiqueta del
+-- PRODUCTO en el catálogo; esta marca la COMPRA. Son independientes: ninguna
+-- se deriva de la otra.
 --
 -- Hasta acá el modelo asumía que toda venta salía con mercadería en la mano y
 -- que `delivered` era un trámite: la prenda estaba, faltaba entregarla. La

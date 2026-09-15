@@ -235,6 +235,7 @@ export type Database = {
           id: string
           image_url: string | null
           images: string[] | null
+          is_preorder: boolean
           name: string
           price: number | null
           provider: string | null
@@ -253,6 +254,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           images?: string[] | null
+          is_preorder?: boolean
           name: string
           price?: number | null
           provider?: string | null
@@ -271,6 +273,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           images?: string[] | null
+          is_preorder?: boolean
           name?: string
           price?: number | null
           provider?: string | null
@@ -305,6 +308,70 @@ export type Database = {
           role?: string
         }
         Relationships: []
+      }
+      sale_movements: {
+        Row: {
+          amount: number
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          kind: string
+          occurred_at: string
+          payment_method: string | null
+          sale_id: string
+          sale_item_id: string | null
+          source_key: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          kind: string
+          occurred_at?: string
+          payment_method?: string | null
+          sale_id: string
+          sale_item_id?: string | null
+          source_key: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          kind?: string
+          occurred_at?: string
+          payment_method?: string | null
+          sale_id?: string
+          sale_item_id?: string | null
+          source_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sale_movements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_movements_sale_id_fkey"
+            columns: ["sale_id"]
+            isOneToOne: false
+            referencedRelation: "sales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_movements_sale_item_id_fkey"
+            columns: ["sale_item_id"]
+            isOneToOne: false
+            referencedRelation: "sale_items"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       sale_items: {
         Row: {
@@ -425,14 +492,12 @@ export type Database = {
           sale_discount: number
           seller_id: string | null
           seller_name: string | null
-          // Existe en la base pero no en ninguna migración del repo (ver 0020).
           shipping_amount: number
-          // También sin migración en el repo: la llena el trigger de `workshop_orders`.
-          workshop_order_id: string | null
           shopify_order_id: string | null
           shopify_order_name: string | null
           sold_at: string
           status: string
+          workshop_order_id: string | null
         }
         Insert: {
           created_at?: string
@@ -456,11 +521,11 @@ export type Database = {
           seller_id?: string | null
           seller_name?: string | null
           shipping_amount?: number
-          workshop_order_id?: string | null
           shopify_order_id?: string | null
           shopify_order_name?: string | null
           sold_at?: string
           status?: string
+          workshop_order_id?: string | null
         }
         Update: {
           created_at?: string
@@ -484,11 +549,11 @@ export type Database = {
           seller_id?: string | null
           seller_name?: string | null
           shipping_amount?: number
-          workshop_order_id?: string | null
           shopify_order_id?: string | null
           shopify_order_name?: string | null
           sold_at?: string
           status?: string
+          workshop_order_id?: string | null
         }
         Relationships: [
           {
@@ -496,6 +561,88 @@ export type Database = {
             columns: ["seller_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_workshop_order_id_fkey"
+            columns: ["workshop_order_id"]
+            isOneToOne: true
+            referencedRelation: "workshop_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workshop_orders: {
+        Row: {
+          color: string | null
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          created_by_name: string | null
+          customer_contact: string | null
+          customer_name: string
+          detail: string | null
+          id: string
+          product_id: string | null
+          product_name: string
+          price: number
+          shipping_amount: number
+          status: string
+          talle: string | null
+          updated_at: string
+          variant_label: string | null
+        }
+        Insert: {
+          color?: string | null
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          created_by_name?: string | null
+          customer_contact?: string | null
+          customer_name: string
+          detail?: string | null
+          id?: string
+          product_id?: string | null
+          product_name: string
+          price?: number
+          shipping_amount?: number
+          status?: string
+          talle?: string | null
+          updated_at?: string
+          variant_label?: string | null
+        }
+        Update: {
+          color?: string | null
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          created_by_name?: string | null
+          customer_contact?: string | null
+          customer_name?: string
+          detail?: string | null
+          id?: string
+          product_id?: string | null
+          product_name?: string
+          price?: number
+          shipping_amount?: number
+          status?: string
+          talle?: string | null
+          updated_at?: string
+          variant_label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workshop_orders_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_orders_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
             referencedColumns: ["id"]
           },
         ]
@@ -544,6 +691,7 @@ export type Database = {
           day: string
           // `numeric` viaja como string en JSON; se coacciona en queries.ts.
           atelier_amount: number | string
+          workshop_amount: number | string
           shopify_amount: number | string
           operations: number
         }[]
@@ -554,6 +702,7 @@ export type Database = {
           // `numeric` viaja como string en JSON; se coacciona en queries.ts.
           total_amount: number | string
           atelier_amount: number | string
+          workshop_amount: number | string
           shopify_amount: number | string
           units: number
           operations: number

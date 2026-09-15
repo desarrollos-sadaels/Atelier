@@ -27,7 +27,7 @@ export type SalesBreakdown = { rows: BreakdownRow[]; error: string | null };
 
 /**
  * Ventas del rango [start, end) por vendedor y canal (función
- * `sales_by_seller_channel`, migraciones 0020/0021). Los filtros de canal y de
+ * `sales_by_seller_channel`, migraciones 0024/0025). Los filtros de canal y de
  * cuenta se aplican después, sobre estas filas: son a lo sumo cuentas × 4, y así
  * una sola consulta alimenta el resumen, la tabla por canal y la tabla por
  * vendedor.
@@ -66,7 +66,7 @@ export async function getSalesBreakdown(start: string, end: string): Promise<Sal
 
 /**
  * Ítem más vendido (top 5) y día con mayores ventas, con los filtros de la
- * pantalla (función `sales_report_highlights`, migración 0021). No se puede
+ * pantalla (función `sales_report_highlights`, migración 0025). No se puede
  * sacar de `getSalesBreakdown`: necesita las prendas y los días, que ahí ya
  * vienen agregados.
  *
@@ -128,8 +128,16 @@ const DETAIL_BATCH = 1000;
 /** Tope de compras de un export. Con el rango limitado a un año sobra; si se llega, se avisa. */
 const DETAIL_MAX_SALES = 30_000;
 
+/** Día (YYYY-MM-DD) de un timestamp en hora de Buenos Aires, el corte que usa la base. */
+const ART_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
+const MOVEMENT_LABEL: Record<string, string> = {
+  return: "Devolución",
+  exchange_difference: "Diferencia de cambio",
+};
+
 /**
- * Una línea por prenda (y una por envío) para el CSV de detalle.
+ * Una línea por prenda, una por envío y una por movimiento para el CSV de detalle.
  *
  * El canal se filtra acá y no en la query porque no es una columna: sale de
  * `saleChannel`, el espejo de la función SQL. La cuenta sí va en la query.
@@ -142,10 +150,11 @@ const DETAIL_MAX_SALES = 30_000;
  * Sin DNI, contacto ni dirección del cliente: el reporte es de ventas, y un CSV
  * se reenvía por mail sin pensarlo.
  *
- * Lo que este detalle NO trae son los movimientos posteriores de
- * `sale_movements`, que sí entran en los totales. Hoy esa tabla está vacía y la
- * app no escribe en ella; si se empieza a usar, hay que sumarlos acá o el
- * detalle deja de sumar lo mismo que el resumen.
+ * Los movimientos de `sale_movements` (el egreso de una devolución, la
+ * diferencia cobrada en un cambio) van en su propia línea, con la fecha en que
+ * OCURRIERON y el canal y la cuenta de la compra original: el mismo criterio
+ * que `sales_kpis`. Desde Taller la app escribe ahí en cada devolución, y sin
+ * estas líneas el detalle dejaba de sumar lo mismo que el resumen.
  */
 export async function getSalesDetail(
   start: string,
@@ -226,6 +235,62 @@ export async function getSalesDetail(
       }
     }
   }
+
+  // Movimientos del rango, por `occurred_at`. Los días son de Buenos Aires
+  // (UTC-3 fijo, sin horario de verano): el mismo corte que hace la base.
+  let movOffset = 0;
+  let movTotal = Infinity;
+  while (movOffset < movTotal) {
+    let query = supabase
+      .from("sale_movements")
+      .select(
+        "id, occurred_at, kind, amount, payment_method, description, sale_items(article, color, talle), sales!inner(id, shopify_order_name, origin, pos, workshop_order_id, seller_id, seller_name, installments)",
+        { count: movOffset === 0 ? "exact" : undefined },
+      )
+      .gte("occurred_at", `${start}T00:00:00-03:00`)
+      .lt("occurred_at", `${end}T00:00:00-03:00`);
+    if (opts.sellerId) query = query.eq("sales.seller_id", opts.sellerId);
+
+    const { data, count, error } = await query
+      .order("occurred_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(movOffset, movOffset + DETAIL_BATCH - 1);
+    if (error) throw new Error(error.message);
+    if (movOffset === 0) movTotal = count ?? 0;
+    if (!data?.length) break;
+    movOffset += data.length;
+
+    for (const m of data) {
+      const sale = m.sales;
+      const channel = saleChannel(sale);
+      if (opts.channels.length && !opts.channels.includes(channel)) continue;
+      const amount = num(m.amount);
+      lines.push({
+        soldAt: ART_DAY.format(new Date(m.occurred_at)),
+        order: sale.shopify_order_name ?? sale.id.slice(0, 8),
+        channel: CHANNEL_LABEL[channel],
+        seller: sellerLabel({ sellerId: sale.seller_id, name: sale.seller_name }),
+        article: m.description ?? m.sale_items?.article ?? "",
+        color: m.sale_items?.color ?? "",
+        talle: m.sale_items?.talle ?? "",
+        // Un movimiento es plata, no mercadería: no suma unidades.
+        qty: 0,
+        price: amount,
+        itemDiscount: 0,
+        saleDiscount: 0,
+        amount,
+        itemStatus: MOVEMENT_LABEL[m.kind] ?? m.kind,
+        paymentMethod: m.payment_method ?? "",
+        installments: sale.installments,
+        pos: sale.pos ?? "",
+        delivery: "",
+      });
+    }
+  }
+
+  // Compras por `sold_at` y movimientos por su fecha, en un solo orden. `sort`
+  // es estable: las líneas de una compra siguen juntas y en su orden.
+  lines.sort((a, b) => a.soldAt.localeCompare(b.soldAt));
 
   return { lines, truncated: offset < total };
 }

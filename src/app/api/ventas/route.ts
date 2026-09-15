@@ -132,6 +132,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Descuento general inválido" }, { status: 400 });
   }
 
+  const shippingAmount = body.shippingAmount == null || body.shippingAmount === ""
+    ? 0
+    : Number(body.shippingAmount);
+  if (!Number.isFinite(shippingAmount) || shippingAmount < 0) {
+    return NextResponse.json({ ok: false, error: "Costo de envío inválido" }, { status: 400 });
+  }
+
   // El path de la factura lo manda el cliente; después se firma con service_role
   // (que ignora RLS). Solo aceptamos la forma que produce nuestro uploader.
   const invoicePath = Boolean(body.invoiced) ? str(body.invoicePath) : null;
@@ -152,6 +159,7 @@ export async function POST(req: NextRequest) {
     installments,
     pos: str(body.pos),
     sale_discount: saleDiscount,
+    shipping_amount: shippingAmount,
     invoiced: Boolean(body.invoiced),
     invoice_path: invoicePath,
     preorder,

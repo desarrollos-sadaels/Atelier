@@ -119,8 +119,9 @@ export type RevenueItem = SaleAmount & {
 };
 
 /**
- * Plata que una prenda aporta al mes. Espejo exacto de `sales_kpis` en la
- * migración 0018 — si una cambia, la otra también.
+ * Plata base que una prenda aporta en la fecha de la venta. Las diferencias y
+ * devoluciones nuevas viven en `sale_movements`; `exchange_adjustment` se
+ * conserva acá para seguir leyendo correctamente los registros históricos.
  *
  * No es `saleItemNet` por dos motivos, y los dos vienen de los cambios:
  *
@@ -136,11 +137,24 @@ export function saleItemRevenue(item: RevenueItem, saleDiscount: number | string
   return saleItemNet(item, saleDiscount) + Number(item.exchange_adjustment ?? 0);
 }
 
-export type SaleWithDiscount = { sale_discount: number | string };
+export type SaleWithDiscount = {
+  sale_discount: number | string;
+  shipping_amount?: number | string | null;
+};
 
-/** Lo que esta compra aporta al mes: la suma de lo que facturan sus prendas. */
+/**
+ * Total original de la compra: prendas facturables más el envío, una sola vez.
+ * Los movimientos posteriores tienen su propia fecha y no modifican este total.
+ */
 export function saleTotal(sale: SaleWithDiscount, items: RevenueItem[]): number {
-  return items.reduce((sum, it) => sum + saleItemRevenue(it, sale.sale_discount), 0);
+  const productRevenue = items.reduce(
+    (sum, it) => sum + saleItemRevenue(it, sale.sale_discount),
+    0,
+  );
+  const shipping = items.some((item) => item.counts_revenue)
+    ? Number(sale.shipping_amount ?? 0)
+    : 0;
+  return productRevenue + shipping;
 }
 
 /** Lo que el cliente se llevó puesto: solo las prendas todavía en su poder. */

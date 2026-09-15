@@ -72,6 +72,7 @@ export function NuevaVentaClient({
   // pago
   const [soldAt, setSoldAt] = useState(today());
   const [saleDiscount, setSaleDiscount] = useState("0");
+  const [shippingCost, setShippingCost] = useState("0");
   const [pago, setPago] = useState(paymentMethods[0]?.name ?? "EFECTIVO");
   const [cuotas, setCuotas] = useState("");
   const [punto, setPunto] = useState("LOCAL");
@@ -123,10 +124,12 @@ export function NuevaVentaClient({
 
   const discountFraction = (Number(saleDiscount) || 0) / 100;
   const subtotal = useMemo(() => items.reduce((s, it) => s + saleNet(it), 0), [items]);
-  const total = useMemo(
+  const productsTotal = useMemo(
     () => items.reduce((s, it) => s + saleItemNet(it, discountFraction), 0),
     [items, discountFraction],
   );
+  const shippingAmount = Number(shippingCost) || 0;
+  const total = productsTotal + shippingAmount;
   const units = items.reduce((s, it) => s + it.qty, 0);
 
   async function submit() {
@@ -134,6 +137,9 @@ export function NuevaVentaClient({
     if (!items.length) return toast.error("Agregá al menos una prenda");
     if (discountFraction < 0 || discountFraction >= 1) {
       return toast.error("Descuento general inválido (0–99%)");
+    }
+    if (!Number.isFinite(shippingAmount) || shippingAmount < 0) {
+      return toast.error("Costo de envío inválido");
     }
 
     // El server revalida contra Shopify. Este flag le dice que el faltante ya
@@ -154,7 +160,7 @@ export function NuevaVentaClient({
       // respuesta perdida), el server devuelve la venta original en vez de
       // registrarla de nuevo y descontar stock dos veces.
       const signature = JSON.stringify({
-        soldAt, saleDiscount, pago, cuotas, punto, invoiced, delivered, preorder, notes,
+        soldAt, saleDiscount, shippingCost, pago, cuotas, punto, invoiced, delivered, preorder, notes,
         custName, custDni, custContact, custAddress,
         items: items.map((it) => [it.article, it.qty, it.price, it.discount, it.variantGid]),
         invoiceFile: invoiceFile ? `${invoiceFile.name}:${invoiceFile.size}:${invoiceFile.lastModified}` : null,
@@ -183,6 +189,7 @@ export function NuevaVentaClient({
           allowOversell: short.length > 0,
           soldAt,
           saleDiscount: discountFraction,
+          shippingAmount,
           paymentMethod: pago,
           installments: showCuotas ? Math.trunc(Number(cuotas)) || cuotaOptions[0] : undefined,
           pos: punto,
@@ -377,6 +384,16 @@ export function NuevaVentaClient({
                 </div>
               )}
 
+              <div className="col-span-2">
+                <Field
+                  label="COSTO DE ENVÍO"
+                  type="number"
+                  min={0}
+                  value={shippingCost}
+                  onChange={(e) => setShippingCost(e.target.value)}
+                />
+              </div>
+
               <div className="col-span-2 border-t border-line pt-4">
                 <div className="flex items-center justify-between py-1.5">
                   <span className="text-[13px]">¿Se hizo factura?</span>
@@ -404,19 +421,18 @@ export function NuevaVentaClient({
               </div>
 
               <div className="col-span-2 border-t border-line pt-4">
+                <Line label={`Subtotal · ${units}u`} value={arsFmt.format(subtotal)} />
                 {discountFraction > 0 && (
-                  <>
-                    <Line label={`Subtotal · ${units}u`} value={arsFmt.format(subtotal)} />
                     <Line
                       label={`Descuento ${Math.round(discountFraction * 100)}%`}
-                      value={`-${arsFmt.format(subtotal - total)}`}
+                      value={`-${arsFmt.format(subtotal - productsTotal)}`}
                       tone="acc"
                     />
-                  </>
                 )}
+                <Line label="Costo de envío" value={arsFmt.format(shippingAmount)} />
                 <div className="mt-2 flex items-baseline justify-between">
                   <span className="mono text-[10px] text-mut">
-                    TOTAL{discountFraction === 0 && units > 0 ? ` · ${units}u` : ""}
+                    TOTAL
                   </span>
                   <span className="font-serif text-[28px] leading-none">{arsFmt.format(total)}</span>
                 </div>

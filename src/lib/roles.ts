@@ -25,9 +25,9 @@ export const ROLE_HOME: Record<Role, string> = {
 
 /** Prefijos de ruta permitidos por rol (admin ve todo). */
 const ROLE_ROUTES: Record<Role, string[]> = {
-  admin: ["/dashboard", "/catalogo", "/ventas", "/metricas", "/configuracion"],
+  admin: ["/dashboard", "/catalogo", "/ventas", "/taller", "/metricas", "/configuracion"],
   medios: ["/metricas", "/ventas", "/catalogo"],
-  vendedor: ["/catalogo", "/ventas"],
+  vendedor: ["/catalogo", "/ventas", "/taller"],
 };
 
 export function normalizeRole(raw: string | null | undefined): Role {
@@ -62,6 +62,7 @@ export function navForRole(role: Role): { label: string; href: string }[] {
     { label: "Dashboard", href: "/dashboard" },
     { label: "Catálogo", href: "/catalogo" },
     { label: "Ventas", href: "/ventas" },
+    { label: "Taller", href: "/taller" },
     { label: "Métricas", href: "/metricas" },
     { label: "Config", href: "/configuracion" },
   ];
