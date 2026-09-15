@@ -65,6 +65,33 @@ export type SaleItemStatus = "active" | "returned" | "exchanged";
  */
 export type SaleStatus = "active" | "returned";
 
+/**
+ * Estado de ENTREGA de una compra. Son dos columnas y no un enum porque
+ * responden preguntas distintas: `preorder` dice QUÉ se vendió (mercadería
+ * futura, que no existía al cobrar) y `delivered` dónde está esa mercadería
+ * HOY. La etiqueta que sale de cruzarlas vive acá y no en la pantalla porque
+ * la usan el listado, el modal de edición y el formulario de alta — con una
+ * copia por pantalla, la preventa terminaba diciendo "Pendiente" en alguna.
+ *
+ * Una preventa ya entregada vuelve a leerse "Entregado": `preorder` queda como
+ * historia de esa compra, pero ya no hay nada esperando.
+ */
+export type DeliveryState = "delivered" | "awaiting" | "pending";
+
+export const DELIVERY_STATE_LABEL: Record<DeliveryState, string> = {
+  delivered: "Entregado",
+  awaiting: "Esperando entrega",
+  pending: "Pendiente",
+};
+
+export function deliveryState(sale: {
+  delivered: boolean;
+  preorder?: boolean | null;
+}): DeliveryState {
+  if (sale.delivered) return "delivered";
+  return sale.preorder ? "awaiting" : "pending";
+}
+
 export const SALE_ORIGIN_LABEL: Record<SaleOrigin, string> = {
   atelier: "Atelier",
   shopify: "Shopify",

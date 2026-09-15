@@ -124,6 +124,9 @@ export async function POST(req: NextRequest) {
   // insuficiente. Distingue una sobreventa deliberada de una que apareció sola.
   const allowOversell = Boolean(body.allowOversell);
 
+  // Preventa: la compra se cobró antes de tener la mercadería.
+  const preorder = Boolean(body.preorder);
+
   const saleDiscount = Number(body.saleDiscount) || 0;
   if (saleDiscount < 0 || saleDiscount >= 1) {
     return NextResponse.json({ ok: false, error: "Descuento general inválido" }, { status: 400 });
@@ -159,7 +162,13 @@ export async function POST(req: NextRequest) {
     shipping_amount: shippingAmount,
     invoiced: Boolean(body.invoiced),
     invoice_path: invoicePath,
-    delivered: Boolean(body.delivered),
+    preorder,
+    // Una preventa NACE sin entregar: es mercadería que todavía no está. No
+    // alcanza con que el formulario apague el toggle —el default de `delivered`
+    // ahí es true y el body lo manda igual—, y una preventa "entregada" no
+    // aparecería en ninguna lista de lo que falta entregar, que es justamente
+    // para lo que existe la marca.
+    delivered: preorder ? false : Boolean(body.delivered),
     notes: str(body.notes),
     idempotency_key: idempotencyKey,
   };

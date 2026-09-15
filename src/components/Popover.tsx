@@ -24,12 +24,15 @@ export function Popover({
   children,
   align = "left",
   panelClass,
+  triggerLabel,
 }: {
   trigger: ReactNode;
   triggerClass?: string;
   children: ReactNode | ((close: () => void) => ReactNode);
   align?: "left" | "right";
   panelClass?: string;
+  /** `aria-label` del botón que abre el panel, cuando su contenido no alcanza como nombre. */
+  triggerLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const mounted = useMounted();
@@ -84,6 +87,7 @@ export function Popover({
         onClick={() => setOpen((o) => !o)}
         className={triggerClass}
         aria-expanded={open}
+        aria-label={triggerLabel}
       >
         {trigger}
       </button>
