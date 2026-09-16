@@ -50,10 +50,13 @@ export function Toggle({
   defaultOn = false,
   on,
   onChange,
+  label,
 }: {
   defaultOn?: boolean;
   on?: boolean;
   onChange?: (v: boolean) => void;
+  /** Nombre accesible. Sin él, un lector de pantalla anuncia solo "interruptor". */
+  label?: string;
 }) {
   const [internal, setInternal] = useState(defaultOn);
   const isOn = on ?? internal;
@@ -62,6 +65,7 @@ export function Toggle({
       type="button"
       role="switch"
       aria-checked={isOn}
+      aria-label={label}
       onClick={() => {
         const next = !isOn;
         if (on === undefined) setInternal(next);

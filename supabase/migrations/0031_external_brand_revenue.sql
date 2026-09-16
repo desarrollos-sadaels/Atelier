@@ -153,6 +153,7 @@ as $$
   from sale_rollup r;
 $$;
 
+revoke execute on function public.sales_kpis(date, date) from public, anon;
 grant execute on function public.sales_kpis(date, date) to authenticated;
 
 drop function if exists public.sales_daily_series(date, date);
@@ -261,6 +262,7 @@ as $$
   order by d;
 $$;
 
+revoke execute on function public.sales_daily_series(date, date) from public, anon;
 grant execute on function public.sales_daily_series(date, date) to authenticated;
 
 drop function if exists public.other_brand_sales_breakdown(date, date);
@@ -316,4 +318,5 @@ as $$
   order by sum(e.gross) desc;
 $$;
 
+revoke execute on function public.other_brand_sales_breakdown(date, date) from public, anon;
 grant execute on function public.other_brand_sales_breakdown(date, date) to authenticated;

@@ -31,7 +31,7 @@ function shiftMonth(month: string, delta: number): string {
 }
 
 const ORIGINS: OriginFilter[] = ["todos", "atelier", "taller", "shopify"];
-const STATUSES: StatusFilter[] = ["todos", "active", "returned"];
+const STATUSES: StatusFilter[] = ["todos", "active", "preorder", "returned"];
 
 const MONTH_LABEL = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric" });
 
@@ -111,9 +111,13 @@ export default async function VentasPage({
     {
       label: k.returnedCount > 0 ? "Devoluciones" : "Entregas pendientes",
       value: k.returnedCount > 0 ? String(k.returnedCount) : String(k.pendingDelivery),
+      // Las devoluciones van por la fecha en que se DEVOLVIERON (0028), no por
+      // la de la venta: una prenda de agosto devuelta en septiembre suma acá. El
+      // filtro "Con devolución" lista por mes de venta, así que los dos números
+      // pueden no coincidir, y el "en el mes" es para que no se lea como error.
       sub:
         k.returnedCount > 0
-          ? `${formatARS(k.returnedAmount)} · ${k.pendingDelivery} entregas pendientes`
+          ? `${formatARS(k.returnedAmount)} devueltos en el mes · ${k.pendingDelivery} entregas pendientes`
           : "sin marcar entregado",
       alert: k.returnedCount > 0 || k.pendingDelivery > 0,
     },

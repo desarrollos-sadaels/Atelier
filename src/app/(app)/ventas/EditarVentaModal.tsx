@@ -24,6 +24,8 @@ export const PUNTOS_DE_VENTA = [
   "WHATSAPP",
   "FASHION X GLOBAL",
   "AMIGOS Y FAMILIA",
+  // El reporte cuenta este punto de venta como canal aparte (ver `saleChannel`).
+  "MAYORISTAS",
 ];
 
 async function uploadInvoice(file: File): Promise<string> {
@@ -79,6 +81,7 @@ export function EditarVentaModal({
   const [custContact, setCustContact] = useState(sale.customer_contact ?? "");
   const [custAddress, setCustAddress] = useState(sale.customer_address ?? "");
   const [delivered, setDelivered] = useState(sale.delivered);
+  const [preorder, setPreorder] = useState(sale.preorder);
   const [invoiced, setInvoiced] = useState(sale.invoiced);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [notes, setNotes] = useState(sale.notes ?? "");
@@ -122,6 +125,7 @@ export function EditarVentaModal({
         paymentMethod: pago,
         installments: cuotaOptions.length ? Math.trunc(Number(cuotas)) || cuotaOptions[0] : null,
         delivered,
+        preorder,
         invoiced,
         notes: notes.trim() || null,
         customer: {
@@ -285,7 +289,23 @@ export function EditarVentaModal({
         </div>
 
         <div className="border-t border-line pt-2">
-          <ToggleRow title="Entregado" on={delivered} onChange={setDelivered} />
+          <ToggleRow
+            title="Preventa"
+            sub="La prenda todavía no está: la compra figura como esperando entrega"
+            on={preorder}
+            onChange={(on) => {
+              setPreorder(on);
+              // Marcarla como preventa la deja esperando mercadería; darla por
+              // entregada no borra que lo fue, que es como quedó registrada.
+              if (on) setDelivered(false);
+            }}
+          />
+          <ToggleRow
+            title="Entregado"
+            sub={preorder && !delivered ? "Marcalo cuando llegue la prenda" : undefined}
+            on={delivered}
+            onChange={setDelivered}
+          />
           <ToggleRow
             title="Facturado"
             sub={sale.invoice_path ? "Ya tiene una factura adjunta" : undefined}

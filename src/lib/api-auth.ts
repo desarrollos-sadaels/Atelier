@@ -36,7 +36,9 @@ export async function requireRole(
   return {
     identity: {
       userId: user.id,
-      name: profile?.full_name ?? profile?.email ?? user.email ?? "—",
+      // `trim() ||` y no `??`: un `full_name` vacío ("") no es null, y el PDF del
+      // vendedor salía "Resumen de " en blanco. Mismo criterio que getCurrentProfile.
+      name: profile?.full_name?.trim() || profile?.email || user.email || "—",
       role,
     },
   };

@@ -124,7 +124,7 @@ export default async function DashboardPage() {
           <ul className="mt-5">
             {alerts.map((a, i) => (
               <li
-                key={a.sku}
+                key={a.id}
                 className={cn(
                   "flex items-center gap-3 py-3",
                   i < alerts.length - 1 && "border-b border-line",

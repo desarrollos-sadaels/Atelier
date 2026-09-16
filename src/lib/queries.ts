@@ -217,13 +217,18 @@ export type DashboardStats = {
   total: number;
   lowStock: number;
   outStock: number;
-  alerts: { name: string; sku: string; qty: string; alert: boolean }[];
+  /**
+   * `id` es la clave de la lista, no `sku`: el SKU no es único (0002) y los
+   * productos sin SKU llegan todos como "—", así que dos en alerta repetían la
+   * key y React lo reportaba en consola.
+   */
+  alerts: { id: string; name: string; sku: string; qty: string; alert: boolean }[];
 };
 
 export async function getDashboardStats(): Promise<DashboardStats> {
   if (!isSupabaseConfigured()) return { total: 0, lowStock: 0, outStock: 0, alerts: [] };
   const supabase = await createClient();
-  const { data } = await supabase.from("products").select("name,sku,stock,alert_threshold");
+  const { data } = await supabase.from("products").select("id,name,sku,stock,alert_threshold");
   const rows = data ?? [];
   const lowStock = rows.filter((r) => r.stock > 0 && r.stock <= r.alert_threshold).length;
   const outStock = rows.filter((r) => r.stock === 0).length;
@@ -231,7 +236,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     .filter((r) => r.stock <= r.alert_threshold)
     .sort((a, b) => a.stock - b.stock)
     .slice(0, 5)
-    .map((r) => ({ name: r.name, sku: r.sku ?? "—", qty: `${r.stock}u`, alert: r.stock === 0 }));
+    .map((r) => ({ id: r.id, name: r.name, sku: r.sku ?? "—", qty: `${r.stock}u`, alert: r.stock === 0 }));
   return { total: rows.length, lowStock, outStock, alerts };
 }
 
@@ -382,8 +387,13 @@ function sanitizeSearch(q: string): string {
  * lo que el vendedor busca cuando filtra es la compra donde pasó algo, y con
  * devoluciones parciales una compra puede tener una prenda devuelta y dos
  * activas. La columna `has_returns` (mantenida por trigger) es justo eso.
+ *
+ * `preorder` son las preventas que todavía deben mercadería —cobradas, sin
+ * entregar y sin devolver—, o sea las que el listado muestra como "Esperando
+ * entrega". No incluye la preventa ya entregada: esa dejó de esperar, aunque
+ * la columna siga marcada como historia de la compra.
  */
-export type SalesStatusFilter = "active" | "returned" | "todos";
+export type SalesStatusFilter = "active" | "preorder" | "returned" | "todos";
 export type SalesChannelFilter = SaleOrigin | "taller" | "todos";
 
 export type SalesFilters = {
@@ -465,6 +475,12 @@ export async function getSales(
   }
   if (status === "active") query = query.eq("status", "active");
   else if (status === "returned") query = query.eq("has_returns", true);
+  // Los tres filtros juntos son el predicado del índice parcial
+  // `idx_sales_preorder_pending` (migración 0023): si cambian acá, hay que
+  // cambiarlo allá o la consulta pasa a escanear la tabla.
+  else if (status === "preorder") {
+    query = query.eq("preorder", true).eq("delivered", false).eq("status", "active");
+  }
 
   const term = sanitizeSearch(q);
   if (term) {

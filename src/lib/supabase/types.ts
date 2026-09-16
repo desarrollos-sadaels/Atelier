@@ -491,6 +491,7 @@ export type Database = {
           origin: string
           payment_method: string | null
           pos: string | null
+          preorder: boolean
           sale_discount: number
           seller_id: string | null
           seller_name: string | null
@@ -518,6 +519,7 @@ export type Database = {
           origin?: string
           payment_method?: string | null
           pos?: string | null
+          preorder?: boolean
           sale_discount?: number
           seller_id?: string | null
           seller_name?: string | null
@@ -545,6 +547,7 @@ export type Database = {
           origin?: string
           payment_method?: string | null
           pos?: string | null
+          preorder?: boolean
           sale_discount?: number
           seller_id?: string | null
           seller_name?: string | null
@@ -661,6 +664,39 @@ export type Database = {
           units: number
           unmapped_amount: number | string
         }[]
+      }
+      sale_channel: {
+        Args: { p_pos: string | null; p_origin: string; p_workshop_order_id: string | null }
+        Returns: string
+      }
+      sales_by_seller_channel: {
+        Args: { p_start: string; p_end: string }
+        Returns: {
+          seller_id: string | null
+          seller_name: string | null
+          channel: string
+          // `numeric` viaja como string en JSON; se coacciona en reports.ts.
+          total_amount: number | string
+          units: number
+          operations: number
+          pending_delivery: number
+          returned_count: number
+          returned_units: number
+          returned_amount: number | string
+          exchanged_count: number
+          exchanged_units: number
+        }[]
+      }
+      sales_report_highlights: {
+        Args: {
+          p_start: string
+          p_end: string
+          p_channels?: string[] | null
+          p_seller_id?: string | null
+        }
+        // jsonb: { top_items: {name, units, amount}[], best_day: {day, amount, operations} | null }.
+        // Se valida al leerlo en reports.ts.
+        Returns: unknown
       }
       sales_daily_series: {
         Args: { p_start: string; p_end: string }
