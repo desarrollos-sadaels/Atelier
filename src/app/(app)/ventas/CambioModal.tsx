@@ -9,6 +9,7 @@ import { btnCls } from "@/components/ui";
 import { X } from "@/components/icons";
 import { exchangeBalance, saleItemNet, saleNet } from "@/lib/sales";
 import type { PaymentMethod } from "@/lib/payments";
+import type { ExternalBrand } from "@/lib/external-brands";
 import { ProductPicker, type ChosenItem } from "./ProductPicker";
 import type { PickerProduct, SaleItemRow, SaleWithItems } from "@/lib/queries";
 import { cn } from "@/lib/cn";
@@ -34,6 +35,7 @@ export function CambioModal({
   open,
   onClose,
   paymentMethods,
+  brands,
 }: {
   sale: SaleWithItems;
   /** La prenda que vuelve. El cambio es por prenda, no por compra. */
@@ -41,6 +43,7 @@ export function CambioModal({
   open: boolean;
   onClose: () => void;
   paymentMethods: PaymentMethod[];
+  brands: ExternalBrand[];
 }) {
   const router = useRouter();
   const [items, setItems] = useState<ChosenItem[]>([]);
@@ -187,7 +190,7 @@ export function CambioModal({
                   {it.qty > 1 && <span className="mono ml-1.5 text-[11px] text-mut">×{it.qty}</span>}
                 </div>
                 <div className="mono text-[10px] uppercase text-mut2">
-                  {[it.color, it.talle && `Talle ${it.talle}`, it.isOtherBrand && (it.brand ?? "otra marca")]
+                  {[it.color, it.talle && `Talle ${it.talle}`, it.isOtherBrand && (it.brand ?? "otra marca"), it.isOtherBrand && it.externalBrandRate != null && `${Math.round(it.externalBrandRate * 10000) / 100}% ingreso`]
                     .filter(Boolean)
                     .join(" · ") || "—"}
                   {it.discount > 0 && (
@@ -218,7 +221,7 @@ export function CambioModal({
             <span className="mono text-[11px] text-mut">Cargando catálogo…</span>
           </div>
         ) : (
-          <ProductPicker products={products} onAdd={(it) => setItems((prev) => [...prev, it])} />
+          <ProductPicker products={products} brands={brands} onAdd={(it) => setItems((prev) => [...prev, it])} />
         )}
       </div>
 

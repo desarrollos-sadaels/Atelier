@@ -4,12 +4,19 @@ import { useState } from "react";
 import type { SalesDay } from "@/lib/queries";
 import { cn } from "@/lib/cn";
 
-/** Ventas por día, apiladas por canal y acompañadas por etiquetas numéricas. */
+/** Ingreso real por día, apilado por canal y acompañado por etiquetas numéricas. */
 const SERIES = [
   { key: "atelier" as const, label: "Atelier", color: "#e2342b" },
   { key: "taller" as const, label: "Taller", color: "#16847b" },
   { key: "shopify" as const, label: "Shopify", color: "#33538f" },
+  { key: "otherBrands" as const, label: "Otras marcas · Sadaels", color: "#7951a7" },
 ];
+const SHIPPING_CHANNELS = [
+  { key: "atelierShipping" as const, label: "Atelier" },
+  { key: "tallerShipping" as const, label: "Taller" },
+  { key: "shopifyShipping" as const, label: "Shopify" },
+];
+const SHIPPING_COLOR = "#ad7845";
 
 const arsFmt = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -28,25 +35,38 @@ function parseDay(iso: string): Date {
   return new Date(`${iso}T00:00:00`);
 }
 
-export function SalesChart({ data }: { data: SalesDay[] }) {
+export function SalesChart({ data, grossProductAmount, noRateBrandGross = 0 }: {
+  data: SalesDay[];
+  grossProductAmount: number;
+  noRateBrandGross?: number;
+}) {
   const [hover, setHover] = useState<number | null>(null);
   const [showTable, setShowTable] = useState(false);
 
   const max = Math.max(...data.map((d) => d.total), 0);
+  const maxShipping = Math.max(...data.map((d) => d.shipping), 0);
   const totals = {
     atelier: data.reduce((sum, day) => sum + day.atelier, 0),
     taller: data.reduce((sum, day) => sum + day.taller, 0),
     shopify: data.reduce((sum, day) => sum + day.shopify, 0),
+    otherBrands: data.reduce((sum, day) => sum + day.otherBrands, 0),
   };
-  const total = totals.atelier + totals.taller + totals.shopify;
+  const total = totals.atelier + totals.taller + totals.shopify + totals.otherBrands;
+  const brandShare = grossProductAmount - total;
+  const shippingTotals = {
+    atelierShipping: data.reduce((sum, day) => sum + day.atelierShipping, 0),
+    tallerShipping: data.reduce((sum, day) => sum + day.tallerShipping, 0),
+    shopifyShipping: data.reduce((sum, day) => sum + day.shopifyShipping, 0),
+  };
+  const shippingTotal = shippingTotals.atelierShipping + shippingTotals.tallerShipping + shippingTotals.shopifyShipping;
 
-  if (!data.length || max === 0) {
+  if (max === 0 && shippingTotal === 0 && noRateBrandGross === 0 && grossProductAmount === 0) {
     return (
       <div className="mt-8 grid h-[180px] place-items-center rounded-[4px] border border-dashed border-line">
         <div className="text-center">
-          <div className="font-serif text-[20px]">Sin ventas en los últimos 30 días</div>
+          <div className="font-serif text-[20px]">Sin ingresos de productos en los últimos 30 días</div>
           <p className="mono mt-2 text-[11px] text-mut">
-            Se puebla con las ventas de Atelier, Taller y la tienda online
+            Se puebla con las ventas de Atelier, Taller, Shopify y otras marcas
           </p>
         </div>
       </div>
@@ -62,6 +82,14 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
         <div>
           <div className="font-serif text-[36px] leading-none tracking-tight">
             {arsFmt.format(total)}
+          </div>
+          <div className="mono mt-1 text-[9px] text-mut">INGRESO SADAELS DE PRODUCTOS · SIN ENVÍOS</div>
+          <div className="mono mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[10px] text-mut">
+            <span>VENTAS BRUTAS DE PRODUCTOS {arsFmt.format(grossProductAmount)}</span>
+            <span>{brandShare < 0 ? "+" : "−"}</span>
+            <span>PARTE DE OTRAS MARCAS {arsFmt.format(Math.abs(brandShare))}</span>
+            <span>=</span>
+            <span className="text-ink">INGRESO SADAELS {arsFmt.format(total)}</span>
           </div>
           <div className="mono mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-mut">
             {SERIES.map((s) => (
@@ -85,33 +113,69 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
           {showTable ? "Ver gráfico" : "Ver datos"}
         </button>
       </div>
+      {noRateBrandGross !== 0 && (
+        <p className="mono mt-2 text-[10px] text-mut">
+          Dentro de «Otras marcas · Sadaels» ya están incluidos {arsFmt.format(noRateBrandGross)} sin tasa al 100%. No se suman aparte.
+        </p>
+      )}
+      <div className="mt-4 flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-line pt-3">
+        <span className="mono flex items-center gap-1.5 text-[10px] text-mut">
+          <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ background: SHIPPING_COLOR }} />
+          ENVÍOS COBRADOS
+        </span>
+        <span className="font-serif text-[21px] leading-none">{arsFmt.format(shippingTotal)}</span>
+        <span className="mono text-[9px] text-mut">
+          {SHIPPING_CHANNELS.map((channel) => `${channel.label} ${arsFmt.format(shippingTotals[channel.key])}`).join(" · ")}
+        </span>
+      </div>
 
       {showTable ? (
-        <div className="mt-5 max-h-[200px] overflow-y-auto">
-          <table className="w-full text-left text-[12px]">
-            <thead className="mono sticky top-0 bg-bg text-[9px] text-mut">
-              <tr>
-                <th className="border-b border-line py-2 pr-3 font-normal">Día</th>
-                <th className="border-b border-line py-2 pr-3 text-right font-normal">Atelier</th>
-                <th className="border-b border-line py-2 pr-3 text-right font-normal">Taller</th>
-                <th className="border-b border-line py-2 pr-3 text-right font-normal">Shopify</th>
-                <th className="border-b border-line py-2 text-right font-normal">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((d) => (
-                <tr key={d.day} className="border-b border-line">
-                  <td className="mono py-1.5 pr-3 text-[11px] text-mut">
-                    {dayFmt.format(parseDay(d.day))}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right">{arsFmt.format(d.atelier)}</td>
-                  <td className="py-1.5 pr-3 text-right">{arsFmt.format(d.taller)}</td>
-                  <td className="py-1.5 pr-3 text-right">{arsFmt.format(d.shopify)}</td>
-                  <td className="py-1.5 text-right font-medium">{arsFmt.format(d.total)}</td>
+        <div className="mt-5">
+          <p className="mb-3 text-[11px] leading-relaxed text-mut">
+            Total del día = productos propios de Atelier + Taller + Shopify + ingreso Sadaels de otras marcas.
+            Las otras marcas aparecen solo en su columna, aunque la venta se haya cargado en Atelier o Shopify.
+            Se aplica su porcentaje al importe después de descuentos; sin tasa, se cuenta el 100% para Sadaels.
+            Los envíos se muestran aparte.
+          </p>
+          <div className="max-h-[200px] overflow-auto">
+            <table className="w-full text-left text-[12px]">
+              <thead className="mono sticky top-0 bg-bg text-[9px] text-mut">
+                <tr>
+                  <th className="border-b border-line py-2 pr-3 font-normal">Día</th>
+                  <th className="border-b border-line py-2 pr-3 text-right font-normal">Atelier · propios</th>
+                  <th className="border-b border-line py-2 pr-3 text-right font-normal">Taller · propios</th>
+                  <th className="border-b border-line py-2 pr-3 text-right font-normal">Shopify · propios</th>
+                  <th className="border-b border-line py-2 pr-3 text-right font-normal">Otras marcas · Sadaels</th>
+                  <th className="border-b border-line py-2 pr-3 text-right font-normal">Total Sadaels</th>
+                  <th className="border-b border-line py-2 text-right font-normal">Envíos aparte</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.map((d) => (
+                  <tr key={d.day} className="border-b border-line">
+                    <td className="mono py-1.5 pr-3 text-[11px] text-mut">
+                      {dayFmt.format(parseDay(d.day))}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right">{arsFmt.format(d.atelier)}</td>
+                    <td className="py-1.5 pr-3 text-right">{arsFmt.format(d.taller)}</td>
+                    <td className="py-1.5 pr-3 text-right">{arsFmt.format(d.shopify)}</td>
+                    <td className="py-1.5 pr-3 text-right">{arsFmt.format(d.otherBrands)}</td>
+                    <td className="py-1.5 pr-3 text-right font-medium">{arsFmt.format(d.total)}</td>
+                    <td className="py-1.5 text-right">
+                      {arsFmt.format(d.shipping)}
+                      {d.shipping > 0 && (
+                        <div className="mono text-[9px] text-mut">
+                          {SHIPPING_CHANNELS.filter((channel) => d[channel.key] > 0)
+                            .map((channel) => `${channel.label} ${arsFmt.format(d[channel.key])}`)
+                            .join(" · ")}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
         <div className="relative mt-6">
@@ -130,6 +194,7 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
               <div className="mt-1.5 font-serif text-[18px] leading-none">
                 {arsFmt.format(active.total)}
               </div>
+              <div className="mono mt-0.5 text-[9px] text-mut">Ingreso Sadaels de productos</div>
               <div className="mono mt-2 space-y-0.5 text-[9px] text-ink2">
                 {SERIES.map((s) => (
                   <div key={s.key} className="flex items-center gap-1.5">
@@ -139,6 +204,14 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
                       style={{ background: s.color }}
                     />
                     {s.label} {arsFmt.format(active[s.key])}
+                  </div>
+                ))}
+                <div className="mt-1 border-t border-line pt-1 text-mut">
+                  Envíos {arsFmt.format(active.shipping)}
+                </div>
+                {SHIPPING_CHANNELS.filter((channel) => active[channel.key] > 0).map((channel) => (
+                  <div key={channel.key} className="text-mut">
+                    {channel.label} {arsFmt.format(active[channel.key])}
                   </div>
                 ))}
                 <div className="text-mut">
@@ -166,7 +239,7 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
                 onBlur={() => setHover(null)}
                 aria-label={`${fullDayFmt.format(parseDay(d.day))}: ${arsFmt.format(
                   d.total,
-                )} — Atelier ${arsFmt.format(d.atelier)}, Taller ${arsFmt.format(d.taller)}, Shopify ${arsFmt.format(d.shopify)}`}
+                )} de ingreso Sadaels — Atelier ${arsFmt.format(d.atelier)}, Taller ${arsFmt.format(d.taller)}, Shopify ${arsFmt.format(d.shopify)}, ingreso Sadaels de otras marcas ${arsFmt.format(d.otherBrands)}; envíos ${arsFmt.format(d.shipping)}`}
               >
                 <span
                   aria-hidden
@@ -199,6 +272,42 @@ export function SalesChart({ data }: { data: SalesDay[] }) {
                 })}
               </button>
             ))}
+          </div>
+          <div className="mt-4 border-t border-line pt-3">
+            <div className="mono flex items-center justify-between gap-3 text-[9px] text-mut">
+              <span>ENVÍOS POR DÍA</span>
+              <span className="text-right">
+                {active
+                  ? `${dayFmt.format(parseDay(active.day))} · ${arsFmt.format(active.shipping)}`
+                  : "ESCALA PROPIA"}
+              </span>
+            </div>
+            <div className="mt-2 flex h-10 items-end gap-[2px]" onMouseLeave={() => setHover(null)}>
+              {data.map((d, i) => (
+                <button
+                  key={d.day}
+                  type="button"
+                  className="flex h-full flex-1 items-end"
+                  onMouseEnter={() => setHover(i)}
+                  onFocus={() => setHover(i)}
+                  onBlur={() => setHover(null)}
+                  tabIndex={d.shipping > 0 ? 0 : -1}
+                  aria-label={`${fullDayFmt.format(parseDay(d.day))}: envíos ${arsFmt.format(d.shipping)} — ${SHIPPING_CHANNELS.map((channel) => `${channel.label} ${arsFmt.format(d[channel.key])}`).join(", ")}`}
+                >
+                  {d.shipping > 0 && (
+                    <span
+                      aria-hidden
+                      className="w-full rounded-t-[2px]"
+                      style={{
+                        height: `${Math.max((d.shipping / maxShipping) * 100, 8)}%`,
+                        background: SHIPPING_COLOR,
+                        opacity: hover === null || hover === i ? 1 : 0.35,
+                      }}
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="mono mt-3 flex justify-between text-[9px] text-mut2">

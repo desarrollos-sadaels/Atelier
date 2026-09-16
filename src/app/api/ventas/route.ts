@@ -3,6 +3,7 @@ import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/api-auth";
 import { deductStockForItem } from "@/lib/sales-ops";
 import { isValidInvoicePath } from "@/lib/sales";
+import { findExternalBrand, parseExternalBrands } from "@/lib/external-brands";
 import type { TablesInsert } from "@/lib/supabase/types";
 
 function str(v: unknown): string | null {
@@ -25,6 +26,7 @@ type ParsedItem = {
   color: string | null;
   talle: string | null;
   brand: string | null;
+  externalBrandRate: number | null;
   isOtherBrand: boolean;
   qty: number;
   price: number;
@@ -67,6 +69,7 @@ function parseItem(raw: unknown, index: number): ParsedItem | { error: string } 
     color: str(it.color),
     talle: str(it.talle),
     brand: isOtherBrand ? str(it.brand) : null,
+    externalBrandRate: null,
     isOtherBrand,
     qty,
     price,
@@ -165,6 +168,24 @@ export async function POST(req: NextRequest) {
   };
 
   const supaAdmin = createAdminClient();
+  if (items.some((item) => item.isOtherBrand)) {
+    const { data, error } = await supaAdmin
+      .from("app_settings")
+      .select("value")
+      .eq("key", "external_brands")
+      .maybeSingle();
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    const brands = parseExternalBrands(data?.value);
+    for (const item of items) {
+      if (!item.isOtherBrand) continue;
+      const brand = findExternalBrand(item.brand, brands);
+      if (!brand) {
+        return NextResponse.json({ ok: false, error: `Marca externa inválida: ${item.brand ?? "sin marca"}` }, { status: 400 });
+      }
+      item.brand = brand.name;
+      item.externalBrandRate = brand.percentage / 100;
+    }
+  }
 
   /** Reintento de una venta ya registrada: devolvemos la original tal cual. */
   async function existingSale(key: string) {
@@ -231,6 +252,7 @@ export async function POST(req: NextRequest) {
     talle: it.talle,
     is_other_brand: it.isOtherBrand,
     brand: it.brand,
+    external_brand_rate: it.externalBrandRate,
     qty: it.qty,
     price: it.price,
     discount: it.discount,

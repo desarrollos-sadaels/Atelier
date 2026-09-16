@@ -6,11 +6,23 @@ import type { UiProduct } from "@/lib/ui-types";
 import { normalizeCategory } from "@/lib/categories";
 import { normalizeRole, type Role } from "@/lib/roles";
 import { parsePaymentMethods, DEFAULT_PAYMENT_METHODS, type PaymentMethod } from "@/lib/payments";
+import { parseExternalBrands, DEFAULT_EXTERNAL_BRANDS, type ExternalBrand } from "@/lib/external-brands";
 import { parseNotificationSettings, type NotificationSettings } from "@/lib/notifications";
-import { saleItemRevenue, saleTotal, type SaleOrigin } from "@/lib/sales";
+import { grossProductRevenue, saleItemRevenue, saleTotal, type SaleOrigin } from "@/lib/sales";
 import { workshopSaleKey } from "@/lib/workshop-sales";
 
 export type { UiProduct };
+
+export async function getExternalBrands(): Promise<ExternalBrand[]> {
+  if (!isSupabaseConfigured()) return DEFAULT_EXTERNAL_BRANDS;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "external_brands")
+    .maybeSingle();
+  return parseExternalBrands(data?.value);
+}
 
 const ars = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -538,13 +550,26 @@ async function getLegacyWorkshopRevenueByDay(
 }
 
 export type SalesKpis = {
+  /** Ingreso de Sadaels por productos, sin envíos; incluye cambios y devoluciones. */
   totalAmount: number;
+  /** Precio neto cobrado por productos antes de repartir ventas de otras marcas. */
+  grossProductAmount: number;
   /** Facturado por ventas cargadas directamente en el Atelier. */
   atelierAmount: number;
   /** Facturado por pedidos personalizados cargados desde Taller. */
   workshopAmount: number;
   /** Facturado por ventas que entraron por la tienda online. */
   shopifyAmount: number;
+  /** Participación de Sadaels en otras marcas; sin tasa explícita cuenta al 100%. */
+  otherBrandAmount: number;
+  otherBrandGrossAmount: number;
+  /** Subconjunto del ingreso de otras marcas que usa el 100% por falta de tasa. */
+  otherBrandUnmappedAmount: number;
+  /** Envíos cobrados, separados del valor de las prendas. */
+  shippingAmount: number;
+  atelierShippingAmount: number;
+  workshopShippingAmount: number;
+  shopifyShippingAmount: number;
   units: number;
   operations: number;
   pendingDelivery: number;
@@ -554,11 +579,44 @@ export type SalesKpis = {
   shopifyUnits: number;
 };
 
+export type OtherBrandSalesRow = {
+  brand: string;
+  grossAmount: number;
+  realAmount: number;
+  units: number;
+  /** Subconjunto bruto sin tasa, ya incluido al 100% en realAmount. */
+  unmappedAmount: number;
+};
+
+export async function getOtherBrandSalesBreakdown(start: string, end: string): Promise<OtherBrandSalesRow[]> {
+  if (!isSupabaseConfigured()) return [];
+  const supabase = await createClient();
+  const { data } = await supabase.rpc("other_brand_sales_breakdown", {
+    p_start: start,
+    p_end: end,
+  });
+  return (data ?? []).map((row) => ({
+    brand: row.brand,
+    grossAmount: Number(row.gross_amount) || 0,
+    realAmount: Number(row.real_amount) || 0,
+    units: Number(row.units) || 0,
+    unmappedAmount: Number(row.unmapped_amount) || 0,
+  }));
+}
+
 const EMPTY_KPIS: SalesKpis = {
   totalAmount: 0,
+  grossProductAmount: 0,
   atelierAmount: 0,
   workshopAmount: 0,
   shopifyAmount: 0,
+  otherBrandAmount: 0,
+  otherBrandGrossAmount: 0,
+  otherBrandUnmappedAmount: 0,
+  shippingAmount: 0,
+  atelierShippingAmount: 0,
+  workshopShippingAmount: 0,
+  shopifyShippingAmount: 0,
   units: 0,
   operations: 0,
   pendingDelivery: 0,
@@ -591,13 +649,24 @@ export async function getSalesKpis(start: string, end: string): Promise<SalesKpi
     ? Number(r.workshop_amount) || 0
     : [...(legacyWorkshopByDay?.values() ?? [])].reduce((sum, amount) => sum + amount, 0);
   const rawAtelierAmount = Number(r.atelier_amount) || 0;
+  const totalAmount = Number(r.total_amount) || 0;
+  const otherBrandAmount = Number(r.other_brand_amount) || 0;
+  const otherBrandGrossAmount = Number(r.other_brand_gross_amount) || 0;
   return {
-    totalAmount: Number(r.total_amount) || 0,
+    totalAmount,
+    grossProductAmount: grossProductRevenue(totalAmount, otherBrandAmount, otherBrandGrossAmount),
     atelierAmount: hasWorkshopAmount
       ? rawAtelierAmount
       : Math.max(0, rawAtelierAmount - workshopAmount),
     workshopAmount,
     shopifyAmount: Number(r.shopify_amount) || 0,
+    otherBrandAmount,
+    otherBrandGrossAmount,
+    otherBrandUnmappedAmount: Number(r.other_brand_unmapped_amount) || 0,
+    shippingAmount: Number(r.shipping_amount) || 0,
+    atelierShippingAmount: Number(r.atelier_shipping_amount) || 0,
+    workshopShippingAmount: Number(r.workshop_shipping_amount) || 0,
+    shopifyShippingAmount: Number(r.shopify_shipping_amount) || 0,
     units: Number(r.units) || 0,
     operations: Number(r.operations) || 0,
     pendingDelivery: Number(r.pending_delivery) || 0,
@@ -610,9 +679,15 @@ export async function getSalesKpis(start: string, end: string): Promise<SalesKpi
 
 export type SalesDay = {
   day: string;
+  /** Importes de productos por canal; los envíos no entran en el gráfico. */
   atelier: number;
   taller: number;
   shopify: number;
+  otherBrands: number;
+  atelierShipping: number;
+  tallerShipping: number;
+  shopifyShipping: number;
+  shipping: number;
   total: number;
   operations: number;
 };
@@ -639,12 +714,21 @@ export async function getSalesSeries(start: string, end: string): Promise<SalesD
       : legacyWorkshopByDay?.get(String(r.day).slice(0, 10)) ?? 0;
     const atelier = hasWorkshopAmount ? rawAtelier : Math.max(0, rawAtelier - taller);
     const shopify = Number(r.shopify_amount) || 0;
+    const otherBrands = Number(r.other_brand_amount) || 0;
+    const atelierShipping = Number(r.atelier_shipping_amount) || 0;
+    const tallerShipping = Number(r.workshop_shipping_amount) || 0;
+    const shopifyShipping = Number(r.shopify_shipping_amount) || 0;
     return {
       day: String(r.day).slice(0, 10),
       atelier,
       taller,
       shopify,
-      total: atelier + taller + shopify,
+      otherBrands,
+      atelierShipping,
+      tallerShipping,
+      shopifyShipping,
+      shipping: atelierShipping + tallerShipping + shopifyShipping,
+      total: atelier + taller + shopify + otherBrands,
       operations: Number(r.operations) || 0,
     };
   });
@@ -666,15 +750,19 @@ function todayRangeART(): { start: string; end: string } {
 /** Monto vendido "hoy" (Buenos Aires), abierto por canal — KPI del dashboard. */
 export async function getTodaySales(): Promise<{
   totalAmount: number;
+  grossProductAmount: number;
   atelierAmount: number;
   workshopAmount: number;
   shopifyAmount: number;
+  otherBrandAmount: number;
+  otherBrandUnmappedAmount: number;
+  shippingAmount: number;
   operations: number;
 }> {
   const { start, end } = todayRangeART();
-  const { totalAmount, atelierAmount, workshopAmount, shopifyAmount, operations } =
+  const { totalAmount, grossProductAmount, atelierAmount, workshopAmount, shopifyAmount, otherBrandAmount, otherBrandUnmappedAmount, shippingAmount, operations } =
     await getSalesKpis(start, end);
-  return { totalAmount, atelierAmount, workshopAmount, shopifyAmount, operations };
+  return { totalAmount, grossProductAmount, atelierAmount, workshopAmount, shopifyAmount, otherBrandAmount, otherBrandUnmappedAmount, shippingAmount, operations };
 }
 
 /** Rango [hoy-N, mañana) en Buenos Aires — para el gráfico de los últimos N días. */

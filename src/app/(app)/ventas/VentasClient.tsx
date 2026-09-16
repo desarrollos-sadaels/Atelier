@@ -10,12 +10,16 @@ import { Chevron, Dots } from "@/components/icons";
 import { ColorSwatch } from "@/components/ColorSwatch";
 import type { Role } from "@/lib/roles";
 import type { PaymentMethod } from "@/lib/payments";
+import type { ExternalBrand } from "@/lib/external-brands";
 import type { SaleItemRow, SaleMovementListItem, SaleWithItems, Seller } from "@/lib/queries";
 import {
   normalizeItemStatus,
   normalizeOrigin,
   saleItemNet,
-  saleTotal,
+  saleItemRealRevenue,
+  saleItemRevenue,
+  saleProductRevenue,
+  saleShippingRevenue,
   type SaleOrigin,
 } from "@/lib/sales";
 import { cn } from "@/lib/cn";
@@ -69,6 +73,7 @@ export function VentasClient({
   nextMonth,
   sellers,
   paymentMethods,
+  brands,
   currentUserId,
 }: {
   rows: SaleWithItems[];
@@ -86,6 +91,7 @@ export function VentasClient({
   nextMonth: string;
   sellers: Seller[];
   paymentMethods: PaymentMethod[];
+  brands: ExternalBrand[];
   currentUserId: string | null;
 }) {
   const router = useRouter();
@@ -257,7 +263,7 @@ export function VentasClient({
                   "Vendedor",
                   "Punto de venta",
                   "Pago",
-                  "Total",
+                  "Total cobrado",
                   "Estado",
                   "",
                 ].map((h, i) => (
@@ -337,6 +343,7 @@ export function VentasClient({
           item={modal.item}
           onClose={() => setModal(null)}
           paymentMethods={paymentMethods}
+          brands={brands}
         />
       )}
     </>
@@ -428,7 +435,16 @@ function SaleRows({
   const items = sale.sale_items;
   const active = items.filter((i) => normalizeItemStatus(i.status) === "active");
   const returned = items.filter((i) => normalizeItemStatus(i.status) === "returned");
-  const total = saleTotal(sale, items);
+  const productAmount = saleProductRevenue(sale, items);
+  const realProductAmount = items.reduce((sum, item) => sum + saleItemRealRevenue(item, sale.sale_discount), 0);
+  const noRateBrandGross = items.reduce(
+    (sum, item) => sum + (item.is_other_brand && item.counts_revenue && item.external_brand_rate == null
+      ? saleItemRevenue(item, sale.sale_discount) : 0),
+    0,
+  );
+  const hasOtherBrands = items.some((item) => item.is_other_brand && item.counts_revenue);
+  const shippingAmount = saleShippingRevenue(sale, items);
+  const total = productAmount + shippingAmount;
   const units = active.reduce((s, i) => s + i.qty, 0);
   const fullyReturned = sale.status === "returned";
   const saleDiscount = Number(sale.sale_discount) || 0;
@@ -524,6 +540,21 @@ function SaleRows({
           <div className="font-serif text-[17px]">
             {fmtARS(total)}
           </div>
+          {shippingAmount > 0 && (
+            <div className="mono text-[9px] text-mut">
+              Productos {fmtARS(productAmount)} · Envío {fmtARS(shippingAmount)}
+            </div>
+          )}
+          {hasOtherBrands && (
+            <div className="mono text-[9px] text-mut">
+              Ingreso Sadaels de productos {fmtARS(realProductAmount)} · sin envío
+            </div>
+          )}
+          {noRateBrandGross !== 0 && (
+            <div className="mono text-[9px] text-acc">
+              Sin tasa · {fmtARS(noRateBrandGross)} incluidos al 100% en Sadaels
+            </div>
+          )}
           {returned.length > 0 && !fullyReturned && (
             <div className="mono text-[9px] text-acc">
               {returned.length} {returned.length === 1 ? "devuelta" : "devueltas"}
@@ -663,6 +694,11 @@ function SaleRows({
                       {[
                         item.talle && `Talle ${item.talle}`,
                         item.is_other_brand ? (item.brand ?? "otra marca") : null,
+                        item.is_other_brand
+                          ? item.external_brand_rate == null
+                            ? "sin tasa · 100% Sadaels"
+                            : `${Math.round(Number(item.external_brand_rate) * 10000) / 100}% ingreso`
+                          : null,
                         Number(item.discount) > 0 && `-${Math.round(Number(item.discount) * 100)}%`,
                         item.exchange_of_item_id ? "entró por cambio" : null,
                         item.return_reason,
@@ -685,6 +721,13 @@ function SaleRows({
                 {Number(item.exchange_adjustment) > 0 && (
                   <div className="mono text-[9px] text-acc">
                     +{fmtARS(Number(item.exchange_adjustment))} dif.
+                  </div>
+                )}
+                {item.is_other_brand && item.counts_revenue && (
+                  <div className="mono text-[9px] text-mut">
+                    {item.external_brand_rate == null
+                      ? `Ingreso Sadaels ${fmtARS(saleItemRealRevenue(item, sale.sale_discount))} · sin tasa, 100%`
+                      : `Ingreso Sadaels ${fmtARS(saleItemRealRevenue(item, sale.sale_discount))}`}
                   </div>
                 )}
                 {!item.counts_revenue && item.exchange_of_item_id && (

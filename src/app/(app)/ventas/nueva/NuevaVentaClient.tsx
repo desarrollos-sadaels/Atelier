@@ -11,6 +11,7 @@ import { ColorSwatch } from "@/components/ColorSwatch";
 import { X } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
 import type { PaymentMethod } from "@/lib/payments";
+import type { ExternalBrand } from "@/lib/external-brands";
 import type { PickerProduct } from "@/lib/queries";
 import { saleItemNet, saleNet } from "@/lib/sales";
 import { cn } from "@/lib/cn";
@@ -54,10 +55,12 @@ export function NuevaVentaClient({
   products,
   sellerName,
   paymentMethods,
+  brands,
 }: {
   products: PickerProduct[];
   sellerName: string;
   paymentMethods: PaymentMethod[];
+  brands: ExternalBrand[];
 }) {
   const router = useRouter();
   const PAGOS = paymentMethods.map((m) => m.name);
@@ -111,6 +114,19 @@ export function NuevaVentaClient({
     () => items.reduce((s, it) => s + saleItemNet(it, discountFraction), 0),
     [items, discountFraction],
   );
+  const otherBrandGross = useMemo(
+    () => items.reduce((sum, it) => sum + (it.isOtherBrand ? saleItemNet(it, discountFraction) : 0), 0),
+    [items, discountFraction],
+  );
+  const otherBrandReal = useMemo(
+    () => items.reduce((sum, it) => sum + (it.isOtherBrand ? saleItemNet(it, discountFraction) * (it.externalBrandRate ?? 1) : 0), 0),
+    [items, discountFraction],
+  );
+  const realProductsTotal = useMemo(
+    () => productsTotal - otherBrandGross + otherBrandReal,
+    [productsTotal, otherBrandGross, otherBrandReal],
+  );
+  const otherBrandShare = otherBrandGross - otherBrandReal;
   const shippingAmount = Number(shippingCost) || 0;
   const total = productsTotal + shippingAmount;
   const units = items.reduce((s, it) => s + it.qty, 0);
@@ -118,6 +134,9 @@ export function NuevaVentaClient({
   async function submit() {
     if (saving) return;
     if (!items.length) return toast.error("Agregá al menos una prenda");
+    if (items.some((item) => item.isOtherBrand && item.externalBrandRate == null)) {
+      return toast.error("Asigná una marca con porcentaje antes de registrar la venta");
+    }
     if (discountFraction < 0 || discountFraction >= 1) {
       return toast.error("Descuento general inválido (0–99%)");
     }
@@ -145,7 +164,7 @@ export function NuevaVentaClient({
       const signature = JSON.stringify({
         soldAt, saleDiscount, shippingCost, pago, cuotas, punto, invoiced, delivered, notes,
         custName, custDni, custContact, custAddress,
-        items: items.map((it) => [it.article, it.qty, it.price, it.discount, it.variantGid]),
+        items: items.map((it) => [it.article, it.brand, it.qty, it.price, it.discount, it.variantGid]),
         invoiceFile: invoiceFile ? `${invoiceFile.name}:${invoiceFile.size}:${invoiceFile.lastModified}` : null,
       });
       if (idempotencyKey.current && lastSignature.current !== signature) {
@@ -272,6 +291,7 @@ export function NuevaVentaClient({
                           {[
                             it.talle && `Talle ${it.talle}`,
                             it.isOtherBrand && (it.brand ?? "otra marca"),
+                            it.isOtherBrand && it.externalBrandRate != null && `${Math.round(it.externalBrandRate * 10000) / 100}% ingreso`,
                             it.discount > 0 && `-${Math.round(it.discount * 100)}%`,
                             it.available !== null && it.available < it.qty && `stock ${it.available}u`,
                           ]
@@ -295,6 +315,7 @@ export function NuevaVentaClient({
 
               <ProductPicker
                 products={products}
+                brands={brands}
                 onAdd={(it) => setItems((prev) => [...prev, it])}
               />
 
@@ -390,6 +411,7 @@ export function NuevaVentaClient({
 
               <div className="col-span-2 border-t border-line pt-4">
                 <Line label={`Subtotal · ${units}u`} value={arsFmt.format(subtotal)} />
+                <p className="mono mb-2 text-[10px] text-mut">El subtotal ya incluye los descuentos de cada prenda.</p>
                 {discountFraction > 0 && (
                     <Line
                       label={`Descuento ${Math.round(discountFraction * 100)}%`}
@@ -397,10 +419,19 @@ export function NuevaVentaClient({
                       tone="acc"
                     />
                 )}
-                <Line label="Costo de envío" value={arsFmt.format(shippingAmount)} />
+                <Line label="Productos después de descuentos" value={arsFmt.format(productsTotal)} />
+                <Line label="Envío cobrado" value={arsFmt.format(shippingAmount)} />
+                {otherBrandGross > 0 && (
+                  <div className="mt-3 border-t border-line pt-3">
+                    <Line label="Otras marcas · venta bruta" value={arsFmt.format(otherBrandGross)} />
+                    <Line label="Parte de las marcas con tasa asignada" value={arsFmt.format(otherBrandShare)} />
+                    <Line label="Ingreso Sadaels · productos" value={arsFmt.format(realProductsTotal)} />
+                  </div>
+                )}
+                <p className="mono mt-3 text-[10px] text-mut">El porcentaje de la marca se aplica después de los descuentos. El envío queda separado del ingreso de productos.</p>
                 <div className="mt-2 flex items-baseline justify-between">
                   <span className="mono text-[10px] text-mut">
-                    TOTAL
+                    TOTAL COBRADO AL CLIENTE
                   </span>
                   <span className="font-serif text-[28px] leading-none">{arsFmt.format(total)}</span>
                 </div>

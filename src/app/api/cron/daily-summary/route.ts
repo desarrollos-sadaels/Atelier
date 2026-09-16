@@ -5,6 +5,7 @@ import { resolveRecipients } from "@/lib/notify";
 import { isEmailConfigured, sendEmail, emailShell, escapeHtml } from "@/lib/email";
 import { allowsInsecureLocalFallback } from "@/lib/env";
 import { hasValidSecret } from "@/lib/secrets";
+import { grossProductRevenue } from "@/lib/sales";
 
 export const runtime = "nodejs";
 
@@ -84,6 +85,11 @@ async function buildAndSend() {
   const totalAmount = Number(kpi?.total_amount) || 0;
   const workshopAmount = Number(kpi?.workshop_amount) || 0;
   const shopifyAmount = Number(kpi?.shopify_amount) || 0;
+  const otherBrandAmount = Number(kpi?.other_brand_amount) || 0;
+  const otherBrandGrossAmount = Number(kpi?.other_brand_gross_amount) || 0;
+  const otherBrandUnmappedAmount = Number(kpi?.other_brand_unmapped_amount) || 0;
+  const grossProductAmount = grossProductRevenue(totalAmount, otherBrandAmount, otherBrandGrossAmount);
+  const shippingAmount = Number(kpi?.shipping_amount) || 0;
   const units = Number(kpi?.units) || 0;
   const operations = Number(kpi?.operations) || 0;
   const pendingDelivery = Number(kpi?.pending_delivery) || 0;
@@ -116,9 +122,12 @@ async function buildAndSend() {
     const html = emailShell(
       `Resumen diario · ${day}`,
       `<div style="font-size:14px;line-height:1.6">
-        <p><strong>Ventas de hoy:</strong> ${operations} operaciones · ${units} unidades · ${ars.format(totalAmount)}<br/>
+        <p><strong>Ventas brutas de productos:</strong> ${operations} operaciones · ${units} unidades · ${ars.format(grossProductAmount)}<br/>
+        <strong>Ingreso de Sadaels (productos):</strong> ${ars.format(totalAmount)}<br/>
+        <strong>Envíos cobrados:</strong> ${ars.format(shippingAmount)}<br/>
         <strong>De Taller:</strong> ${ars.format(workshopAmount)}<br/>
         <strong>De la tienda online:</strong> ${ars.format(shopifyAmount)}<br/>
+        <strong>De otras marcas para Sadaels:</strong> ${ars.format(otherBrandAmount)}${otherBrandUnmappedAmount !== 0 ? `<br/><strong>Otras marcas sin tasa, incluidas al 100%:</strong> ${ars.format(otherBrandUnmappedAmount)}` : ""}<br/>
         <strong>Entregas pendientes:</strong> ${pendingDelivery}${returned ? `<br/><strong>Devoluciones:</strong> ${returned} prendas · ${ars.format(returnedAmount)}` : ""}</p>
         <p style="font-weight:600;margin-top:16px">Stock bajo / sin stock</p>
         <table style="border-collapse:collapse;width:100%;font-size:13px;border-top:1px solid #eee">${lowRows}</table>
@@ -135,8 +144,12 @@ async function buildAndSend() {
     items: lines.length,
     units,
     totalAmount,
+    grossProductAmount,
+    shippingAmount,
     workshopAmount,
     shopifyAmount,
+    otherBrandAmount,
+    otherBrandUnmappedAmount,
     returned,
     lowStock: lowStock.length,
     emailSkipped: skipped,

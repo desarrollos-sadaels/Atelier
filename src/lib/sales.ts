@@ -89,6 +89,8 @@ export function normalizeItemStatus(raw: string | null | undefined): SaleItemSta
 export type RevenueItem = SaleAmount & {
   counts_revenue: boolean;
   exchange_adjustment: number | string;
+  is_other_brand?: boolean;
+  external_brand_rate?: number | string | null;
 };
 
 /**
@@ -115,19 +117,40 @@ export type SaleWithDiscount = {
   shipping_amount?: number | string | null;
 };
 
-/**
- * Total original de la compra: prendas facturables más el envío, una sola vez.
- * Los movimientos posteriores tienen su propia fecha y no modifican este total.
- */
-export function saleTotal(sale: SaleWithDiscount, items: RevenueItem[]): number {
-  const productRevenue = items.reduce(
+/** Importe de prendas de la compra, sin el envío. */
+export function saleProductRevenue(sale: SaleWithDiscount, items: RevenueItem[]): number {
+  return items.reduce(
     (sum, it) => sum + saleItemRevenue(it, sale.sale_discount),
     0,
   );
-  const shipping = items.some((item) => item.counts_revenue)
+}
+
+/** Ingreso Sadaels: sin tasa explícita, la prenda se computa al 100%. */
+export function saleItemRealRevenue(item: RevenueItem, saleDiscount: number | string = 0): number {
+  const gross = saleItemRevenue(item, saleDiscount);
+  if (!item.counts_revenue) return 0;
+  return item.is_other_brand ? gross * Number(item.external_brand_rate ?? 1) : gross;
+}
+
+/** Reconcilia el ingreso de Sadaels con lo cobrado por todas las prendas. */
+export function grossProductRevenue(
+  sadaelsProductRevenue: number,
+  sadaelsOtherBrandRevenue: number,
+  otherBrandGrossRevenue: number,
+): number {
+  return sadaelsProductRevenue - sadaelsOtherBrandRevenue + otherBrandGrossRevenue;
+}
+
+/** Envío facturable de la compra, una sola vez y solo si quedan prendas facturables. */
+export function saleShippingRevenue(sale: SaleWithDiscount, items: RevenueItem[]): number {
+  return items.some((item) => item.counts_revenue)
     ? Number(sale.shipping_amount ?? 0)
     : 0;
-  return productRevenue + shipping;
+}
+
+/** Total cobrado de la compra. Los movimientos posteriores tienen su propia fecha. */
+export function saleTotal(sale: SaleWithDiscount, items: RevenueItem[]): number {
+  return saleProductRevenue(sale, items) + saleShippingRevenue(sale, items);
 }
 
 /** Lo que el cliente se llevó puesto: solo las prendas todavía en su poder. */

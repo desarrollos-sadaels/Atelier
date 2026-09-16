@@ -7,6 +7,7 @@ import {
   getRecentActivity,
   getTodaySales,
   getSalesSeries,
+  getSalesKpis,
   getCurrentProfile,
   firstNameOf,
   formatARS,
@@ -19,11 +20,12 @@ const CHART_DAYS = 30;
 
 export default async function DashboardPage() {
   const chartRange = lastDaysRangeART(CHART_DAYS);
-  const [stats, activity, todaySales, series, profile] = await Promise.all([
+  const [stats, activity, todaySales, series, chartKpis, profile] = await Promise.all([
     getDashboardStats(),
     getRecentActivity(),
     getTodaySales(),
     getSalesSeries(chartRange.start, chartRange.end),
+    getSalesKpis(chartRange.start, chartRange.end),
     getCurrentProfile(),
   ]);
   const firstName = firstNameOf(profile?.name);
@@ -39,13 +41,13 @@ export default async function DashboardPage() {
     { label: "Stock bajo", value: String(stats.lowStock), sub: "en o bajo el umbral", alert: false },
     { label: "Sin stock", value: String(stats.outStock), sub: "requieren reposición", alert: stats.outStock > 0 },
     {
-      label: "Ventas hoy",
+      label: "Ingreso Sadaels hoy",
       value: todaySales.operations > 0 ? formatARS(todaySales.totalAmount) : "—",
       // El total suma los tres canales; el desglose evita confundir Taller con
       // las ventas cargadas directamente en Atelier.
       sub:
         todaySales.operations > 0
-          ? `${formatARS(todaySales.atelierAmount)} atelier · ${formatARS(todaySales.workshopAmount)} taller · ${formatARS(todaySales.shopifyAmount)} online`
+          ? `Bruto productos ${formatARS(todaySales.grossProductAmount)} · ${formatARS(todaySales.atelierAmount)} atelier · ${formatARS(todaySales.workshopAmount)} taller · ${formatARS(todaySales.shopifyAmount)} online · ${formatARS(todaySales.otherBrandAmount)} Sadaels de otras marcas · ${formatARS(todaySales.shippingAmount)} envíos separados${todaySales.otherBrandUnmappedAmount !== 0 ? ` · ${formatARS(todaySales.otherBrandUnmappedAmount)} sin tasa incluidos al 100%` : ""}`
           : "sin ventas todavía",
       alert: false,
     },
@@ -102,8 +104,12 @@ export default async function DashboardPage() {
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1.75fr_1fr]">
         {/* chart */}
         <Card className="p-6">
-          <Eyebrow>Ventas · últimos {CHART_DAYS} días</Eyebrow>
-          <SalesChart data={series} />
+          <Eyebrow>Ingreso Sadaels · últimos {CHART_DAYS} días</Eyebrow>
+          <SalesChart
+            data={series}
+            grossProductAmount={chartKpis.grossProductAmount}
+            noRateBrandGross={chartKpis.otherBrandUnmappedAmount}
+          />
         </Card>
 
         {/* alerts */}

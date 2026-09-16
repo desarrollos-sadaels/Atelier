@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { KpiRow } from "@/components/KpiRow";
-import { btnCls } from "@/components/ui";
+import { Card, CardTitle, btnCls } from "@/components/ui";
 import { Plus } from "@/components/icons";
 import {
   getCurrentProfile,
   getPaymentMethods,
+  getExternalBrands,
+  getOtherBrandSalesBreakdown,
   getSales,
   getSalesKpis,
   getSaleMovements,
@@ -61,7 +63,7 @@ export default async function VentasPage({
 
   // Los KPIs salen de una agregación en la base sobre el mes completo, así que
   // no dependen ni de la página ni de los filtros activos.
-  const [profile, k, sales, movements, sellers, paymentMethods] = await Promise.all([
+  const [profile, k, sales, movements, sellers, paymentMethods, brands, brandSales] = await Promise.all([
     getCurrentProfile(),
     getSalesKpis(start, end),
     getSales(start, end, {
@@ -73,6 +75,8 @@ export default async function VentasPage({
     getSaleMovements(start, end),
     getSellers(),
     getPaymentMethods(),
+    getExternalBrands(),
+    getOtherBrandSalesBreakdown(start, end),
   ]);
   const role = uiRole(profile?.role);
 
@@ -83,13 +87,27 @@ export default async function VentasPage({
     k.totalAmount > 0 ? Math.round((k.shopifyAmount / k.totalAmount) * 100) : 0;
 
   const kpis = [
-    { label: "Ventas del mes", value: formatARS(k.totalAmount), sub: "Atelier, Taller y Shopify" },
+    {
+      label: "Ventas brutas de productos",
+      value: formatARS(k.grossProductAmount),
+      sub: `${k.units} unidades · ${k.operations} operaciones · sin envíos`,
+    },
+    { label: "Ingreso Sadaels del mes", value: formatARS(k.totalAmount), sub: `Productos · sin envíos${k.otherBrandUnmappedAmount !== 0 ? " · incluye marcas sin tasa al 100%" : ""}` },
     {
       label: "Tienda online",
       value: formatARS(k.shopifyAmount),
       sub: k.totalAmount > 0 ? `${shopifyShare}% del total · ${k.shopifyUnits} u` : "sin ventas online",
     },
-    { label: "Unidades", value: String(k.units), sub: `${k.operations} operaciones` },
+    {
+      label: "Envíos cobrados",
+      value: formatARS(k.shippingAmount),
+      sub: `${formatARS(k.atelierShippingAmount)} atelier · ${formatARS(k.workshopShippingAmount)} taller · ${formatARS(k.shopifyShippingAmount)} online`,
+    },
+    {
+      label: "Otras marcas · venta bruta",
+      value: formatARS(k.otherBrandGrossAmount),
+      sub: `Sadaels ${formatARS(k.otherBrandAmount)} · Marcas ${formatARS(k.otherBrandGrossAmount - k.otherBrandAmount)} · Sin tasa incluidos en Sadaels ${formatARS(k.otherBrandUnmappedAmount)} · ${k.otherBrandUnits} u`,
+    },
     {
       label: k.returnedCount > 0 ? "Devoluciones" : "Entregas pendientes",
       value: k.returnedCount > 0 ? String(k.returnedCount) : String(k.pendingDelivery),
@@ -124,6 +142,64 @@ export default async function VentasPage({
         <KpiRow items={kpis} />
       </div>
 
+      <Card className="mt-6">
+        <CardTitle>Otras marcas · ventas del mes</CardTitle>
+        <div className="px-6 pb-6 pt-3">
+          <p className="text-[12px] text-mut">
+            La venta bruta de otras marcas se divide entre ingreso de Sadaels y parte de las marcas. Si una venta histórica no tiene tasa, el 100% se cuenta como ingreso de Sadaels y la parte de la marca es $0. Primero se descuenta cada prenda; después, el descuento general. El porcentaje se aplica sobre ese precio neto. El envío se muestra aparte. Los cambios de porcentaje en Configuración rigen para ventas nuevas.
+          </p>
+          {k.otherBrandUnmappedAmount !== 0 && (
+            <p className="mt-3 text-[12px] text-acc">
+              {formatARS(k.otherBrandUnmappedAmount)} de ventas sin tasa se incluyen íntegramente en el ingreso de Sadaels. Si el admin les asigna una tasa histórica, el reparto se recalcula.
+            </p>
+          )}
+          {brandSales.length === 0 ? (
+            <p className="mono mt-5 text-[11px] text-mut">Sin ventas de otras marcas en este mes.</p>
+          ) : (
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full text-left text-[12px]">
+                <thead className="mono text-[10px] text-mut">
+                  <tr className="border-b border-line">
+                    <th className="py-2 font-normal">Marca</th>
+                    <th className="py-2 text-right font-normal">Unidades</th>
+                    <th className="py-2 text-right font-normal">Venta bruta</th>
+                    <th className="py-2 text-right font-normal">Parte de la marca</th>
+                    <th className="py-2 text-right font-normal">Ingreso Sadaels</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {brandSales.map((row) => (
+                    <tr key={row.brand} className="border-b border-line last:border-0">
+                      <td className="py-2.5 font-medium">{row.brand}{row.unmappedAmount !== 0 ? " · sin tasa: 100% Sadaels" : ""}</td>
+                      <td className="py-2.5 text-right">{row.units}</td>
+                      <td className="py-2.5 text-right">{formatARS(row.grossAmount)}</td>
+                      <td className="py-2.5 text-right">{formatARS(row.grossAmount - row.realAmount)}</td>
+                      <td className="py-2.5 text-right font-medium">
+                        {formatARS(row.realAmount)}
+                        {row.unmappedAmount !== 0 && (
+                          <div className="mono text-[9px] font-normal text-acc">
+                            Incluye {formatARS(row.unmappedAmount)} sin tasa al 100%
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="border-t border-line font-medium">
+                  <tr>
+                    <td className="pt-3">Total otras marcas</td>
+                    <td className="pt-3 text-right">{k.otherBrandUnits}</td>
+                    <td className="pt-3 text-right">{formatARS(k.otherBrandGrossAmount)}</td>
+                    <td className="pt-3 text-right">{formatARS(k.otherBrandGrossAmount - k.otherBrandAmount)}</td>
+                    <td className="pt-3 text-right">{formatARS(k.otherBrandAmount)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      </Card>
+
       <VentasClient
         rows={sales.rows}
         movements={movements}
@@ -140,6 +216,7 @@ export default async function VentasPage({
         nextMonth={shiftMonth(month, 1)}
         sellers={sellers}
         paymentMethods={paymentMethods}
+        brands={brands}
         currentUserId={profile?.id ?? null}
       />
     </>

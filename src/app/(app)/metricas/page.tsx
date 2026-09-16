@@ -119,15 +119,16 @@ export default async function MetricasPage() {
             <KpiRow
               items={[
                 {
-                  label: "Ingresos",
+                  label: "Ventas de productos",
                   value: formatARS(shopifyOverview.revenue),
-                  sub: "ventas de la tienda",
+                  sub: "sin envíos",
                 },
+                { label: "Envíos", value: formatARS(shopifyOverview.shipping), sub: "cobrados en la tienda" },
                 { label: "Pedidos", value: nf(shopifyOverview.orders), sub: "no cancelados" },
                 {
                   label: "Ticket promedio",
                   value: formatARS(shopifyOverview.aov),
-                  sub: "ingresos / pedidos",
+                  sub: "productos / pedidos",
                 },
               ]}
             />

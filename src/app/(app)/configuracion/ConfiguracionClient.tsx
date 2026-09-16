@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardTitle, Chip, btnCls } from "@/components/ui";
@@ -12,6 +13,12 @@ import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { ROLE_LABEL, ROLES, normalizeRole, type Role } from "@/lib/roles";
 import { parsePaymentMethods, DEFAULT_PAYMENT_METHODS, type PaymentMethod } from "@/lib/payments";
+import {
+  parseExternalBrands,
+  validateExternalBrands,
+  DEFAULT_EXTERNAL_BRANDS,
+  type ExternalBrand,
+} from "@/lib/external-brands";
 import {
   DEFAULT_NOTIFICATION_SETTINGS,
   parseNotificationSettings,
@@ -46,6 +53,7 @@ export function ConfiguracionClient() {
   const [tab, setTab] = useState("Usuarios y permisos");
   const [users, setUsers] = useState<UserRow[]>([]);
   const [methods, setMethods] = useState<PaymentMethod[]>(DEFAULT_PAYMENT_METHODS);
+  const [brands, setBrands] = useState<ExternalBrand[]>(DEFAULT_EXTERNAL_BRANDS);
   const [notif, setNotif] = useState<NotificationSettings>(DEFAULT_NOTIFICATION_SETTINGS);
 
   useEffect(() => {
@@ -72,6 +80,14 @@ export function ConfiguracionClient() {
       .maybeSingle()
       .then(({ data }) => {
         if (data?.value) setMethods(parsePaymentMethods(data.value));
+      });
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "external_brands")
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) setBrands(parseExternalBrands(data.value));
       });
     supabase
       .from("app_settings")
@@ -113,7 +129,12 @@ export function ConfiguracionClient() {
         {/* panel */}
         <div>
           {tab === "Usuarios y permisos" && <UsuariosPanel users={users} />}
-          {tab === "Ventas" && <PagosSettingsPanel initial={methods} />}
+          {tab === "Ventas" && (
+            <div className="space-y-6">
+              <PagosSettingsPanel initial={methods} />
+              <ExternalBrandsPanel initial={brands} onSaved={setBrands} />
+            </div>
+          )}
           {tab === "Cuenta" && <CuentaPanel />}
           {tab === "Integraciones" && <IntegracionesPanel />}
           {tab === "Notificaciones" && <NotificacionesPanel initial={notif} />}
@@ -401,6 +422,147 @@ function PagosSettingsPanel({ initial }: { initial: PaymentMethod[] }) {
           <button className={btnCls("ghost", "h-11")} onClick={addMethod}>
             <Plus className="h-4 w-4" /> Agregar
           </button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ExternalBrandsPanel({
+  initial,
+  onSaved,
+}: {
+  initial: ExternalBrand[];
+  onSaved: (brands: ExternalBrand[]) => void;
+}) {
+  const router = useRouter();
+  const [brands, setBrands] = useState(initial);
+  const [previous, setPrevious] = useState(initial);
+  const [newName, setNewName] = useState("");
+  const [newPercentage, setNewPercentage] = useState("30");
+  const [saving, setSaving] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+  const hasUnsavedChanges = JSON.stringify(brands) !== JSON.stringify(initial);
+
+  if (initial !== previous) {
+    setPrevious(initial);
+    setBrands(initial);
+  }
+
+  function addBrand() {
+    const candidate = { name: newName.trim(), percentage: Number(newPercentage) };
+    if (!candidate.name || !newPercentage.trim() || !Number.isFinite(candidate.percentage)) return toast.error("Completá la marca y el porcentaje");
+    if (candidate.percentage < 0 || candidate.percentage > 100) return toast.error("El porcentaje debe estar entre 0 y 100");
+    if (brands.some((brand) => brand.name.toLocaleUpperCase("es-AR") === candidate.name.toLocaleUpperCase("es-AR"))) {
+      return toast.error("Esa marca ya existe");
+    }
+    setBrands((current) => [...current, candidate]);
+    setNewName("");
+    setNewPercentage("30");
+  }
+
+  async function save() {
+    if (saving || backfilling) return;
+    const valid = validateExternalBrands(brands);
+    if (!valid) return toast.error("Revisá los nombres y porcentajes de las marcas");
+    setSaving(true);
+    const t = toast.loading("Guardando porcentajes…");
+    try {
+      const res = await fetch("/api/settings/external-brands", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brands: valid }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "No se pudieron guardar las marcas");
+      setBrands(data.brands);
+      onSaved(data.brands);
+      toast.success("Porcentajes de marcas actualizados", { id: t });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudieron guardar las marcas", { id: t });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function applyToPendingSales() {
+    if (saving || backfilling || hasUnsavedChanges) return;
+    if (!window.confirm("Se aplicarán los porcentajes actuales solo a ventas anteriores de estas marcas que todavía no tengan tasa. Las tasas ya guardadas no cambiarán. ¿Continuar?")) return;
+    setBackfilling(true);
+    const t = toast.loading("Asignando porcentajes pendientes…");
+    try {
+      const res = await fetch("/api/settings/external-brands/backfill", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "No se pudieron actualizar las ventas pendientes");
+      toast.success(`${data.updated} prendas históricas actualizadas`, { id: t });
+      router.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudieron actualizar las ventas pendientes", { id: t });
+    } finally {
+      setBackfilling(false);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between px-6 pt-6">
+        <span className="mono text-[11px] text-mut">Otras marcas · ingreso de Sadaels</span>
+        <button className={btnCls("primary", "h-9 text-[12px]")} disabled={saving || backfilling} onClick={save}>
+          {saving ? "Guardando…" : "Guardar"}
+        </button>
+      </div>
+      <div className="px-6 pb-6 pt-3">
+        <p className="text-[13px] text-mut">
+          El porcentaje es la parte que queda para Sadaels. Primero se aplican el descuento de cada prenda y el descuento general; luego se calcula la participación sobre ese precio neto. Ejemplo: si la prenda queda en $100.000 y la tasa es 30%, Sadaels recibe $30.000 y la marca $70.000. El envío se contabiliza por separado. Cada venta guarda su tasa al registrarse; cambiarla aquí afecta a las ventas nuevas.
+        </p>
+        <div className="mt-5 space-y-3">
+          {brands.map((brand, index) => (
+            <div key={index} className="grid grid-cols-[1fr_110px_28px] items-end gap-3">
+              <Field
+                label="MARCA"
+                value={brand.name}
+                onChange={(event) => setBrands((current) => current.map((row, i) => i === index ? { ...row, name: event.target.value } : row))}
+              />
+              <Field
+                label="INGRESO %"
+                type="number"
+                min={0}
+                max={100}
+                step={0.01}
+                value={brand.percentage}
+                onChange={(event) => setBrands((current) => current.map((row, i) => i === index ? { ...row, percentage: Number(event.target.value) } : row))}
+              />
+              <button
+                type="button"
+                className="mb-2 grid h-7 w-7 place-items-center rounded-full border border-line2 text-mut hover:border-acc hover:text-acc"
+                onClick={() => setBrands((current) => current.filter((_, i) => i !== index))}
+                aria-label={`Quitar ${brand.name}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 grid grid-cols-[1fr_110px_auto] items-end gap-3 border-t border-line pt-5">
+          <Field label="NUEVA MARCA" value={newName} onChange={(event) => setNewName(event.target.value)} />
+          <Field label="INGRESO %" type="number" min={0} max={100} step={0.01} value={newPercentage} onChange={(event) => setNewPercentage(event.target.value)} />
+          <button type="button" className={btnCls("ghost", "h-11")} onClick={addBrand}>
+            <Plus className="h-4 w-4" /> Agregar
+          </button>
+        </div>
+        <div className="mt-5 border-t border-line pt-5">
+          <p className="mb-3 text-[12px] text-mut">
+            Las ventas anteriores sin tasa cuentan al 100% como ingreso de Sadaels. Podés aplicarles los porcentajes guardados a las marcas que coincidan por nombre; eso recalculará su reparto. Las tasas históricas ya asignadas no se modifican.
+          </p>
+          <button
+            type="button"
+            className={btnCls("ghost", "h-10 text-[12px]")}
+            disabled={saving || backfilling || hasUnsavedChanges}
+            onClick={applyToPendingSales}
+          >
+            {backfilling ? "Actualizando…" : "Aplicar a ventas históricas pendientes"}
+          </button>
+          {hasUnsavedChanges && <p className="mono mt-2 text-[10px] text-mut">Guardá los cambios antes de aplicarlos.</p>}
         </div>
       </div>
     </Card>

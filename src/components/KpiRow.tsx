@@ -5,7 +5,10 @@ type Kpi = { label: string; value: string; sub: string; alert?: boolean };
 export function KpiRow({ items }: { items: Kpi[] }) {
   return (
     <>
-      <div className="grid grid-cols-2 border-t border-line md:grid-cols-4">
+      <div className={cn(
+        "grid grid-cols-2 border-t border-line",
+        items.length === 5 ? "md:grid-cols-3 xl:grid-cols-5" : items.length === 6 ? "md:grid-cols-3" : "md:grid-cols-4",
+      )}>
         {items.map((k, i) => (
           <div
             key={k.label}

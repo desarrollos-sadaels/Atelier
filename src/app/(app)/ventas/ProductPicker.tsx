@@ -9,6 +9,7 @@ import { ColorSwatch } from "@/components/ColorSwatch";
 import { CatalogProductSearch } from "@/components/CatalogProductSearch";
 import { btnCls } from "@/components/ui";
 import type { PickerProduct } from "@/lib/queries";
+import type { ExternalBrand } from "@/lib/external-brands";
 import { cn } from "@/lib/cn";
 
 export type { PickerProduct } from "@/lib/queries";
@@ -32,6 +33,7 @@ export type ChosenItem = {
   color: string | null;
   talle: string | null;
   brand: string | null;
+  externalBrandRate: number | null;
   isOtherBrand: boolean;
   qty: number;
   price: number;
@@ -57,9 +59,11 @@ const arsFmt = new Intl.NumberFormat("es-AR", {
  */
 export function ProductPicker({
   products,
+  brands,
   onAdd,
 }: {
   products: PickerProduct[];
+  brands: ExternalBrand[];
   onAdd: (item: ChosenItem) => void;
 }) {
   const [otherBrand, setOtherBrand] = useState(false);
@@ -78,6 +82,8 @@ export function ProductPicker({
   const [qty, setQty] = useState("1");
   const [price, setPrice] = useState("");
   const [discount, setDiscount] = useState("0");
+  const selectedBrand = brands.find((candidate) => candidate.name === brand) ?? null;
+  const brandOptions = brands.map((candidate) => `${candidate.name} · ${candidate.percentage}%`);
 
   const colors = useMemo(
     () => [...new Set((variants ?? []).map((v) => v.color).filter(Boolean))] as string[],
@@ -147,6 +153,7 @@ export function ProductPicker({
 
     if (!otherBrand && !product) return toast.error("Elegí un producto del catálogo");
     if (otherBrand && !freeArticle.trim()) return toast.error("Ingresá el artículo");
+    if (otherBrand && !selectedBrand) return toast.error("Elegí una marca configurada");
     if (!Number.isFinite(priceNum) || priceNum <= 0) return toast.error("Ingresá un precio válido");
     if (discountNum < 0 || discountNum >= 1) return toast.error("Descuento inválido (0–99%)");
     if (needsVariant) return toast.error("Elegí la variante de la prenda");
@@ -159,7 +166,8 @@ export function ProductPicker({
       article: otherBrand ? freeArticle.trim() : product!.name,
       color: otherBrand ? freeColor.trim() || null : color,
       talle: otherBrand ? freeTalle.trim() || null : talle,
-      brand: otherBrand ? brand.trim() || null : null,
+      brand: otherBrand ? selectedBrand!.name : null,
+      externalBrandRate: otherBrand ? selectedBrand!.percentage / 100 : null,
       isOtherBrand: otherBrand,
       qty: qtyNum,
       price: priceNum,
@@ -313,7 +321,19 @@ export function ProductPicker({
         </div>
       ) : (
         <div className="mt-4 grid grid-cols-2 gap-3">
-          <Field label="MARCA" value={brand} onChange={(e) => setBrand(e.target.value)} />
+          <div>
+            <Dropdown
+              label="MARCA"
+              value={selectedBrand ? `${selectedBrand.name} · ${selectedBrand.percentage}%` : "Elegir marca"}
+              options={brandOptions}
+              onChange={(option) => setBrand(brands.find((candidate) => `${candidate.name} · ${candidate.percentage}%` === option)?.name ?? "")}
+            />
+            {selectedBrand && (
+              <p className="mono mt-1 text-[10px] text-mut">
+                Ingreso Sadaels: {selectedBrand.percentage}% del precio neto
+              </p>
+            )}
+          </div>
           <Field
             label="ARTÍCULO"
             value={freeArticle}

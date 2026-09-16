@@ -382,6 +382,7 @@ export type Database = {
           created_at: string
           discount: number
           exchange_adjustment: number
+          external_brand_rate: number | null
           exchange_of_item_id: string | null
           exchange_payment_method: string | null
           id: string
@@ -406,6 +407,7 @@ export type Database = {
           created_at?: string
           discount?: number
           exchange_adjustment?: number
+          external_brand_rate?: number | null
           exchange_of_item_id?: string | null
           exchange_payment_method?: string | null
           id?: string
@@ -430,6 +432,7 @@ export type Database = {
           created_at?: string
           discount?: number
           exchange_adjustment?: number
+          external_brand_rate?: number | null
           exchange_of_item_id?: string | null
           exchange_payment_method?: string | null
           id?: string
@@ -649,6 +652,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      other_brand_sales_breakdown: {
+        Args: { p_start: string; p_end: string }
+        Returns: {
+          brand: string
+          gross_amount: number | string
+          real_amount: number | string
+          units: number
+          unmapped_amount: number | string
+        }[]
+      }
       sales_daily_series: {
         Args: { p_start: string; p_end: string }
         Returns: {
@@ -657,6 +670,10 @@ export type Database = {
           atelier_amount: number | string
           workshop_amount: number | string
           shopify_amount: number | string
+          other_brand_amount: number | string
+          atelier_shipping_amount: number | string
+          workshop_shipping_amount: number | string
+          shopify_shipping_amount: number | string
           operations: number
         }[]
       }
@@ -668,6 +685,13 @@ export type Database = {
           atelier_amount: number | string
           workshop_amount: number | string
           shopify_amount: number | string
+          other_brand_amount: number | string
+          other_brand_gross_amount: number | string
+          other_brand_unmapped_amount: number | string
+          shipping_amount: number | string
+          atelier_shipping_amount: number | string
+          workshop_shipping_amount: number | string
+          shopify_shipping_amount: number | string
           units: number
           operations: number
           pending_delivery: number

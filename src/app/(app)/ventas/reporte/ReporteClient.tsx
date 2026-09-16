@@ -18,9 +18,11 @@ type SummaryItem = { k: string; v: string; acc?: boolean };
 export function ReporteClient({
   summary,
   hasSales,
+  periodLabel,
 }: {
   summary: SummaryItem[];
   hasSales: boolean;
+  periodLabel: string;
 }) {
   const [range, setRange] = useState("30 días");
   const [format, setFormat] = useState("XLSX");
@@ -127,13 +129,16 @@ export function ReporteClient({
         {/* preview */}
         <Card>
           <div className="flex items-center justify-between px-6 pt-6">
-            <span className="mono text-[11px] text-mut">Vista previa</span>
+            <span className="mono text-[11px] text-mut">Vista previa · últimos 30 días</span>
             <span className="mono text-[10px] text-acc">Actualizada</span>
           </div>
           <div className="px-6 pb-6">
-            <div className="mt-4 grid grid-cols-2 border-t border-line md:grid-cols-4">
-              {summary.map((s, i) => (
-                <div key={s.k} className={cn("py-5", i > 0 && "border-l border-line pl-5")}>
+            <p className="mono mt-3 text-[10px] text-mut">
+              {periodLabel} · mismo período y cálculo que el gráfico del dashboard. Los controles de exportación aún no modifican esta vista previa.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-x-4 border-t border-line xl:grid-cols-3">
+              {summary.map((s) => (
+                <div key={s.k} className="py-5">
                   <div className="mono text-[10px] text-mut">{s.k}</div>
                   <div className={cn("mt-1 font-serif text-[30px] tracking-tight", s.acc && "text-acc")}>
                     {s.v}
@@ -145,7 +150,7 @@ export function ReporteClient({
             <div className="mt-6 grid h-[220px] place-items-center rounded-[4px] border border-dashed border-line text-center">
               <div>
                 <div className="font-serif text-[18px]">
-                  {hasSales ? "Ventas de los últimos 30 días" : "Sin ventas en este período"}
+                  {hasSales ? `Ventas del ${periodLabel}` : "Sin ventas en este período"}
                 </div>
                 <p className="mono mt-2 text-[11px] text-mut">
                   {hasSales
