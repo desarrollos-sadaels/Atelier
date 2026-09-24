@@ -18,6 +18,7 @@ import {
   type ReportHighlights,
   type SaleChannel,
 } from "@/lib/sales-report";
+import { WHOLESALE_FULFILLMENT_LABEL, isWholesaleFulfillmentMethod } from "@/lib/wholesale";
 
 const num = (v: unknown) => Number(v) || 0;
 
@@ -51,6 +52,11 @@ export async function getSalesBreakdown(start: string, end: string): Promise<Sal
       // este código; se cuenta como Atelier antes que perder la plata.
       channel: isChannel(r.channel) ? r.channel : "atelier",
       total: num(r.total_amount),
+      // Fallback temporal para una base que todavía no recibió la 0034: la
+      // función anterior solo devolvía total_amount (bruto más envío).
+      gross: num(r.gross_amount ?? r.total_amount),
+      income: num(r.income_amount ?? r.total_amount),
+      shipping: num(r.shipping_amount),
       units: num(r.units),
       operations: num(r.operations),
       pendingDelivery: num(r.pending_delivery),
@@ -121,6 +127,8 @@ export type SaleDetailLine = {
   installments: number | null;
   pos: string;
   delivery: string;
+  wholesaleStore: string;
+  fulfillment: string;
 };
 
 /** Filas por pedido a PostgREST. Su `max-rows` default es 1000; pedir más no sirve. */
@@ -170,7 +178,7 @@ export async function getSalesDetail(
     let query = supabase
       .from("sales")
       .select(
-        "id, sold_at, shopify_order_name, origin, pos, workshop_order_id, seller_id, seller_name, payment_method, installments, delivered, preorder, sale_discount, shipping_amount, sale_items(created_at, article, color, talle, qty, price, discount, status, counts_revenue, exchange_adjustment)",
+        "id, sold_at, shopify_order_name, origin, pos, wholesale_store, fulfillment_method, workshop_order_id, seller_id, seller_name, payment_method, installments, delivered, preorder, sale_discount, shipping_amount, sale_items(created_at, article, color, talle, qty, price, discount, status, counts_revenue, exchange_adjustment)",
         { count: offset === 0 ? "exact" : undefined },
       )
       .gte("sold_at", start)
@@ -200,6 +208,10 @@ export async function getSalesDetail(
         installments: sale.installments,
         pos: sale.pos ?? "",
         delivery: DELIVERY_STATE_LABEL[deliveryState(sale)],
+        wholesaleStore: sale.wholesale_store ?? "",
+        fulfillment: isWholesaleFulfillmentMethod(sale.fulfillment_method)
+          ? WHOLESALE_FULFILLMENT_LABEL[sale.fulfillment_method]
+          : "",
       };
       const items = [...(sale.sale_items ?? [])].sort((a, b) =>
         a.created_at.localeCompare(b.created_at),
@@ -244,7 +256,7 @@ export async function getSalesDetail(
     let query = supabase
       .from("sale_movements")
       .select(
-        "id, occurred_at, kind, amount, payment_method, description, sale_items(article, color, talle), sales!inner(id, shopify_order_name, origin, pos, workshop_order_id, seller_id, seller_name, installments)",
+        "id, occurred_at, kind, amount, payment_method, description, sale_items(article, color, talle), sales!inner(id, shopify_order_name, origin, pos, wholesale_store, fulfillment_method, workshop_order_id, seller_id, seller_name, installments)",
         { count: movOffset === 0 ? "exact" : undefined },
       )
       .gte("occurred_at", `${start}T00:00:00-03:00`)
@@ -284,6 +296,10 @@ export async function getSalesDetail(
         installments: sale.installments,
         pos: sale.pos ?? "",
         delivery: "",
+        wholesaleStore: sale.wholesale_store ?? "",
+        fulfillment: isWholesaleFulfillmentMethod(sale.fulfillment_method)
+          ? WHOLESALE_FULFILLMENT_LABEL[sale.fulfillment_method]
+          : "",
       });
     }
   }

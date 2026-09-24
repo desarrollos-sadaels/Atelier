@@ -481,6 +481,7 @@ export type Database = {
           customer_dni: string | null
           customer_name: string | null
           delivered: boolean
+          fulfillment_method: string | null
           has_returns: boolean
           id: string
           idempotency_key: string | null
@@ -500,6 +501,7 @@ export type Database = {
           shopify_order_name: string | null
           sold_at: string
           status: string
+          wholesale_store: string | null
           workshop_order_id: string | null
         }
         Insert: {
@@ -509,6 +511,7 @@ export type Database = {
           customer_dni?: string | null
           customer_name?: string | null
           delivered?: boolean
+          fulfillment_method?: string | null
           has_returns?: boolean
           id?: string
           idempotency_key?: string | null
@@ -528,6 +531,7 @@ export type Database = {
           shopify_order_name?: string | null
           sold_at?: string
           status?: string
+          wholesale_store?: string | null
           workshop_order_id?: string | null
         }
         Update: {
@@ -537,6 +541,7 @@ export type Database = {
           customer_dni?: string | null
           customer_name?: string | null
           delivered?: boolean
+          fulfillment_method?: string | null
           has_returns?: boolean
           id?: string
           idempotency_key?: string | null
@@ -556,6 +561,7 @@ export type Database = {
           shopify_order_name?: string | null
           sold_at?: string
           status?: string
+          wholesale_store?: string | null
           workshop_order_id?: string | null
         }
         Relationships: [
@@ -677,6 +683,9 @@ export type Database = {
           channel: string
           // `numeric` viaja como string en JSON; se coacciona en reports.ts.
           total_amount: number | string
+          gross_amount: number | string
+          income_amount: number | string
+          shipping_amount: number | string
           units: number
           operations: number
           pending_delivery: number

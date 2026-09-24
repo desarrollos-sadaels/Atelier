@@ -11,6 +11,11 @@ import { ColorSwatch } from "@/components/ColorSwatch";
 import type { Role } from "@/lib/roles";
 import type { PaymentMethod } from "@/lib/payments";
 import type { ExternalBrand } from "@/lib/external-brands";
+import {
+  WHOLESALE_FULFILLMENT_LABEL,
+  isWholesaleFulfillmentMethod,
+  type WholesaleSettings,
+} from "@/lib/wholesale";
 import type { SaleItemRow, SaleMovementListItem, SaleWithItems, Seller } from "@/lib/queries";
 import {
   DELIVERY_STATE_LABEL,
@@ -79,6 +84,7 @@ export function VentasClient({
   sellers,
   paymentMethods,
   brands,
+  wholesaleSettings,
   currentUserId,
 }: {
   rows: SaleWithItems[];
@@ -97,6 +103,7 @@ export function VentasClient({
   sellers: Seller[];
   paymentMethods: PaymentMethod[];
   brands: ExternalBrand[];
+  wholesaleSettings: WholesaleSettings;
   currentUserId: string | null;
 }) {
   const router = useRouter();
@@ -251,9 +258,14 @@ export function VentasClient({
               : "Acá aparecen las ventas de Atelier, Taller y la tienda online."}
           </p>
           {!readOnly && !query && (
-            <Link href="/ventas/nueva" className={btnCls("primary", "mt-5")}>
-              Registrar venta
-            </Link>
+            <div className="mt-5 flex flex-wrap justify-center gap-3">
+              <Link href="/ventas/nueva?tipo=mayorista" className={btnCls("ghost")}>
+                Venta mayorista
+              </Link>
+              <Link href="/ventas/nueva" className={btnCls("primary")}>
+                Registrar venta
+              </Link>
+            </div>
           )}
         </div>
       ) : (
@@ -334,6 +346,7 @@ export function VentasClient({
           role={role}
           sellers={sellers}
           paymentMethods={paymentMethods}
+          wholesaleSettings={wholesaleSettings}
           currentUserId={currentUserId}
         />
       )}
@@ -511,6 +524,9 @@ function SaleRows({
                   lead?.talle && `Talle ${lead.talle}`,
                   sale.shopify_order_name,
                   workshopSale && "Pedido de Taller",
+                  sale.wholesale_store,
+                  isWholesaleFulfillmentMethod(sale.fulfillment_method) &&
+                    WHOLESALE_FULFILLMENT_LABEL[sale.fulfillment_method],
                   saleDiscount > 0 && `-${Math.round(saleDiscount * 100)}% compra`,
                   Number(sale.shipping_amount) > 0 && `Envío ${fmtARS(Number(sale.shipping_amount))}`,
                 ]

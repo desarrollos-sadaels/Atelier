@@ -47,7 +47,7 @@ export default async function DashboardPage() {
       // las ventas cargadas directamente en Atelier.
       sub:
         todaySales.operations > 0
-          ? `Bruto productos ${formatARS(todaySales.grossProductAmount)} · ${formatARS(todaySales.atelierAmount)} atelier · ${formatARS(todaySales.workshopAmount)} taller · ${formatARS(todaySales.shopifyAmount)} online · ${formatARS(todaySales.otherBrandAmount)} Sadaels de otras marcas · ${formatARS(todaySales.shippingAmount)} envíos separados${todaySales.otherBrandUnmappedAmount !== 0 ? ` · ${formatARS(todaySales.otherBrandUnmappedAmount)} sin tasa incluidos al 100%` : ""}`
+          ? `Venta bruta ${formatARS(todaySales.grossProductAmount)} · envíos ${formatARS(todaySales.shippingAmount)} aparte`
           : "sin ventas todavía",
       alert: false,
     },
@@ -108,7 +108,6 @@ export default async function DashboardPage() {
           <SalesChart
             data={series}
             grossProductAmount={chartKpis.grossProductAmount}
-            noRateBrandGross={chartKpis.otherBrandUnmappedAmount}
           />
         </Card>
 

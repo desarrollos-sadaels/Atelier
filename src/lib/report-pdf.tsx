@@ -94,7 +94,7 @@ const s = StyleSheet.create({
   row: { flexDirection: "row", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: LINE },
   totalRow: { flexDirection: "row", paddingVertical: 6, fontFamily: "Helvetica-Bold" },
   th: { fontSize: 7, color: MUT },
-  cellSub: { fontSize: 7, color: MUT, marginTop: 1.5 },
+  cellSub: { fontFamily: "Helvetica", fontSize: 6.5, color: MUT, marginTop: 1.5 },
   footer: {
     position: "absolute",
     bottom: 22,
@@ -114,13 +114,14 @@ const s = StyleSheet.create({
 
 /** Anchos relativos: primera columna (nombre) y las ocho de números. */
 const FLEX = [2.3, 1.4, 0.55, 0.75, 0.7, 1.2, 0.65, 0.75, 0.65];
-const HEADS = ["Ventas", "%", "Operac.", "Unid.", "Ticket prom.", "Pend.", "Cambios", "Devol."];
+const HEADS = ["Ingreso", "%", "Operac.", "Unid.", "Ticket prom.", "Pend.", "Cambios", "Devol."];
 
-type TableRow = { key: string; label: string; sub?: string; cells: string[]; dim?: boolean };
+type TableCell = string | { primary: string; sub: string };
+type TableRow = { key: string; label: string; sub?: string; cells: TableCell[]; dim?: boolean };
 
-function metricCells(t: ReportTotals, share: number): string[] {
+function metricCells(t: ReportTotals, share: number): TableCell[] {
   return [
-    money(t.total),
+    { primary: money(t.income), sub: `Bruta ${money(t.gross)}` },
     `${share}%`,
     String(t.operations),
     String(t.units),
@@ -131,7 +132,7 @@ function metricCells(t: ReportTotals, share: number): string[] {
   ];
 }
 
-function Table({ first, rows, total }: { first: string; rows: TableRow[]; total?: string[] }) {
+function Table({ first, rows, total }: { first: string; rows: TableRow[]; total?: TableCell[] }) {
   return (
     <View style={s.table}>
       <View style={s.headRow} fixed>
@@ -149,21 +150,35 @@ function Table({ first, rows, total }: { first: string; rows: TableRow[]; total?
             <Text>{r.label}</Text>
             {r.sub ? <Text style={s.cellSub}>{r.sub}</Text> : null}
           </View>
-          {r.cells.map((c, i) => (
-            <Text key={i} style={{ flex: FLEX[i + 1], textAlign: "right" }}>
-              {c}
-            </Text>
-          ))}
+          {r.cells.map((c, i) =>
+            typeof c === "string" ? (
+              <Text key={i} style={{ flex: FLEX[i + 1], textAlign: "right" }}>
+                {c}
+              </Text>
+            ) : (
+              <View key={i} style={{ flex: FLEX[i + 1], textAlign: "right" }}>
+                <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 9.5 }}>{c.primary}</Text>
+                <Text style={s.cellSub}>{c.sub}</Text>
+              </View>
+            ),
+          )}
         </View>
       ))}
       {total ? (
         <View style={s.totalRow} wrap={false}>
           <Text style={{ flex: FLEX[0] }}>Total</Text>
-          {total.map((c, i) => (
-            <Text key={i} style={{ flex: FLEX[i + 1], textAlign: "right" }}>
-              {c}
-            </Text>
-          ))}
+          {total.map((c, i) =>
+            typeof c === "string" ? (
+              <Text key={i} style={{ flex: FLEX[i + 1], textAlign: "right" }}>
+                {c}
+              </Text>
+            ) : (
+              <View key={i} style={{ flex: FLEX[i + 1], textAlign: "right" }}>
+                <Text>{c.primary}</Text>
+                <Text style={s.cellSub}>{c.sub}</Text>
+              </View>
+            ),
+          )}
         </View>
       ) : null}
     </View>
@@ -200,12 +215,16 @@ function SalesReportDocument({
   const changes = totals.returnedCount + totals.exchangedCount;
   const [top, ...rest] = highlights.topItems;
   const best = highlights.bestDay;
-  const channelTotal = byChannel.reduce((sum, r) => sum + r.total, 0);
+  const channelTotal = byChannel.reduce((sum, r) => sum + r.income, 0);
   const hint = Object.fromEntries(SALE_CHANNELS.map((c) => [c.value, c.hint]));
   const brandShare = incomeSummary ? incomeSummary.grossProductAmount - incomeSummary.totalAmount : 0;
 
   const kpis = [
-    { label: "Ventas cobradas", value: totals.operations || totals.total ? money(totals.total) : "—", sub: `${channelsLabel(channels)} · productos y envíos` },
+    {
+      label: "Ingreso Sadaels · productos",
+      value: totals.operations || totals.income ? money(totals.income) : "—",
+      sub: `Venta bruta ${money(totals.gross)} · envíos ${money(totals.shipping)} aparte`,
+    },
     { label: "Operaciones", value: String(totals.operations), sub: plural(totals.units, "unidad", "unidades") },
     { label: "Ticket promedio", value: ticket(totals), sub: "ventas / operaciones" },
     {
@@ -333,7 +352,7 @@ function SalesReportDocument({
               key: r.channel,
               label: CHANNEL_LABEL[r.channel],
               sub: hint[r.channel],
-              cells: metricCells(r, sharePct(r.total, channelTotal)),
+              cells: metricCells(r, sharePct(r.income, channelTotal)),
               dim: channels.length > 0 && !channels.includes(r.channel),
             }))}
           />
@@ -352,7 +371,7 @@ function SalesReportDocument({
                   key: r.sellerId ?? "sin-vendedor",
                   label: sellerLabel(r),
                   sub: r.sellerId ? undefined : "pedidos web sin reclamar",
-                  cells: metricCells(r, sharePct(r.total, totals.total)),
+                  cells: metricCells(r, sharePct(r.income, totals.income)),
                 }))}
                 total={bySeller.length > 1 ? metricCells(totals, totals.total > 0 ? 100 : 0) : undefined}
               />

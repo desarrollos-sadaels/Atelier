@@ -130,15 +130,17 @@ export function ReporteClient({
   };
 
   const employeeMode = Boolean(sellerId);
-  const hasSales = totals.operations > 0 || totals.total !== 0;
+  const hasSales = totals.operations > 0 || totals.gross !== 0 || totals.income !== 0;
   const scopeLabel = channelsLabel(channels);
   const changes = totals.returnedCount + totals.exchangedCount;
 
   const kpis = [
     {
-      label: "Ventas cobradas",
-      value: hasSales ? fmtARS(totals.total) : "—",
-      sub: `${scopeLabel} · productos y envíos`,
+      label: "Ingreso Sadaels · productos",
+      value: hasSales ? fmtARS(totals.income) : "—",
+      sub: hasSales
+        ? `Venta bruta ${fmtARS(totals.gross)} · envíos ${fmtARS(totals.shipping)} aparte`
+        : `${scopeLabel} · sin ventas`,
     },
     {
       label: "Operaciones",
@@ -245,7 +247,7 @@ export function ReporteClient({
             <Card className="mt-8">
               <SectionHead
                 title={employeeMode ? "Por canal" : "Ventas por canal"}
-                description="Mayoristas y Taller se cuentan aparte de Atelier: salen del punto de venta de cada compra."
+                description="El ingreso de Sadaels aparece primero y la venta bruta debajo; los envíos se informan aparte. Mayoristas y Taller se cuentan separados de Atelier."
               />
               <ChannelTable rows={byChannel} selected={channels} />
             </Card>
@@ -254,7 +256,7 @@ export function ReporteClient({
               <Card className="mt-8">
                 <SectionHead
                   title="Ventas por vendedor"
-                  description="Cada compra cuenta para quien la tiene a su nombre. Los pedidos web que nadie reclamó quedan en su propia fila: se asignan editando la venta desde Ventas."
+                  description="El ingreso de Sadaels aparece primero y la venta bruta debajo. Cada compra cuenta para quien la tiene a su nombre; los pedidos web sin reclamar quedan en su propia fila."
                 />
                 {bySeller.length === 0 ? (
                   <EmptyState title="Sin ventas en este período">
@@ -907,8 +909,21 @@ function ShareBar({ pct, muted }: { pct: number; muted?: boolean }) {
   );
 }
 
+function SalesAmount({ totals, empty = false }: { totals: ReportTotals; empty?: boolean }) {
+  if (empty) return <>—</>;
+  return (
+    <>
+      <div className="text-[14px] font-medium text-ink">{fmtARS(totals.income)}</div>
+      <div className="mono mt-1 text-[9px] font-normal uppercase tracking-wide text-mut">
+        Venta bruta {fmtARS(totals.gross)}
+        {totals.shipping !== 0 ? ` · Envíos ${fmtARS(totals.shipping)}` : ""}
+      </div>
+    </>
+  );
+}
+
 function ChannelTable({ rows, selected }: { rows: ChannelSummary[]; selected: SaleChannel[] }) {
-  const all = rows.reduce((s, r) => s + r.total, 0);
+  const all = rows.reduce((s, r) => s + r.income, 0);
   const hint = Object.fromEntries(SALE_CHANNELS.map((c) => [c.value, c.hint]));
   const showChanges = rows.some((r) => r.returnedCount > 0 || r.exchangedCount > 0);
   return (
@@ -917,7 +932,7 @@ function ChannelTable({ rows, selected }: { rows: ChannelSummary[]; selected: Sa
         <thead className="mono text-[10px] text-mut">
           <tr>
             <th className={th}>Canal</th>
-            <th className={cn(th, "text-right")}>Ventas</th>
+            <th className={cn(th, "text-right")}>Ingreso Sadaels</th>
             <th className={th}>Participación</th>
             <th className={cn(th, "text-right")}>Operac.</th>
             <th className={cn(th, "text-right")}>Unidades</th>
@@ -938,9 +953,11 @@ function ChannelTable({ rows, selected }: { rows: ChannelSummary[]; selected: Sa
                   <div className="font-medium">{CHANNEL_LABEL[r.channel]}</div>
                   <div className="mono mt-0.5 text-[10px] text-mut">{hint[r.channel]}</div>
                 </td>
-                <td className={cn(td, "text-right font-medium")}>{r.operations || r.total ? fmtARS(r.total) : "—"}</td>
+                <td className={cn(td, "text-right")}>
+                  <SalesAmount totals={r} empty={!r.operations && !r.gross && !r.income} />
+                </td>
                 <td className={td}>
-                  <ShareBar pct={sharePct(r.total, all)} />
+                  <ShareBar pct={sharePct(r.income, all)} />
                 </td>
                 <td className={cn(td, "text-right")}>{r.operations}</td>
                 <td className={cn(td, "text-right")}>{r.units}</td>
@@ -975,7 +992,7 @@ function SellerTable({
         <thead className="mono text-[10px] text-mut">
           <tr>
             <th className={th}>Vendedor</th>
-            <th className={cn(th, "text-right")}>Ventas</th>
+            <th className={cn(th, "text-right")}>Ingreso Sadaels</th>
             <th className={th}>Participación</th>
             <th className={cn(th, "text-right")}>Operac.</th>
             <th className={cn(th, "text-right")}>Unidades</th>
@@ -1004,9 +1021,11 @@ function SellerTable({
                     <div className="mono mt-0.5 text-[10px] text-mut">pedidos web sin reclamar</div>
                   )}
                 </td>
-                <td className={cn(td, "text-right font-medium")}>{fmtARS(r.total)}</td>
+                <td className={cn(td, "text-right")}>
+                  <SalesAmount totals={r} />
+                </td>
                 <td className={td}>
-                  <ShareBar pct={sharePct(r.total, totals.total)} muted={unassigned} />
+                  <ShareBar pct={sharePct(r.income, totals.income)} muted={unassigned} />
                 </td>
                 <td className={cn(td, "text-right")}>{r.operations}</td>
                 <td className={cn(td, "text-right")}>{r.units}</td>
@@ -1024,7 +1043,9 @@ function SellerTable({
           <tfoot>
             <tr className="font-medium">
               <td className="py-3 pr-4">Total</td>
-              <td className={cn(td, "text-right")}>{fmtARS(totals.total)}</td>
+              <td className={cn(td, "text-right")}>
+                <SalesAmount totals={totals} />
+              </td>
               <td className={td} />
               <td className={cn(td, "text-right")}>{totals.operations}</td>
               <td className={cn(td, "text-right")}>{totals.units}</td>

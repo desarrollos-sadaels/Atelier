@@ -12,6 +12,14 @@ import { X } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
 import type { PaymentMethod } from "@/lib/payments";
 import type { ExternalBrand } from "@/lib/external-brands";
+import {
+  WHOLESALE_FULFILLMENT_LABEL,
+  WHOLESALE_FULFILLMENT_OPTIONS,
+  WHOLESALE_POS,
+  wholesaleFulfillmentFromLabel,
+  type WholesaleFulfillmentMethod,
+  type WholesaleSettings,
+} from "@/lib/wholesale";
 import type { PickerProduct } from "@/lib/queries";
 import { saleItemNet, saleNet } from "@/lib/sales";
 import { cn } from "@/lib/cn";
@@ -20,7 +28,8 @@ import { ProductPicker, type ChosenItem } from "../ProductPicker";
 export type { PickerProduct } from "@/lib/queries";
 
 // MAYORISTAS es además un canal aparte en el reporte de ventas (ver `saleChannel`).
-const PUNTOS = ["LOCAL", "SHOPIFY", "CHAT", "INSTAGRAM", "WHATSAPP", "FASHION X GLOBAL", "AMIGOS Y FAMILIA", "MAYORISTAS"];
+const PUNTOS = ["LOCAL", "SHOPIFY", "CHAT", "INSTAGRAM", "WHATSAPP", "FASHION X GLOBAL", "AMIGOS Y FAMILIA"];
+const NO_WHOLESALE_STORE = "— Seleccionar tienda —";
 
 async function uploadInvoice(file: File): Promise<string> {
   const supabase = createClient();
@@ -57,11 +66,15 @@ export function NuevaVentaClient({
   sellerName,
   paymentMethods,
   brands,
+  wholesaleSettings,
+  initialWholesale,
 }: {
   products: PickerProduct[];
   sellerName: string;
   paymentMethods: PaymentMethod[];
   brands: ExternalBrand[];
+  wholesaleSettings: WholesaleSettings;
+  initialWholesale: boolean;
 }) {
   const router = useRouter();
   const PAGOS = paymentMethods.map((m) => m.name);
@@ -74,11 +87,16 @@ export function NuevaVentaClient({
   const [custAddress, setCustAddress] = useState("");
   // pago
   const [soldAt, setSoldAt] = useState(today());
-  const [saleDiscount, setSaleDiscount] = useState("0");
+  const [saleDiscount, setSaleDiscount] = useState(
+    initialWholesale ? String(wholesaleSettings.discountPercentage) : "0",
+  );
   const [shippingCost, setShippingCost] = useState("0");
   const [pago, setPago] = useState(paymentMethods[0]?.name ?? "EFECTIVO");
   const [cuotas, setCuotas] = useState("");
-  const [punto, setPunto] = useState("LOCAL");
+  const [punto, setPunto] = useState(initialWholesale ? WHOLESALE_POS : "LOCAL");
+  const [wholesaleStore, setWholesaleStore] = useState("");
+  const [fulfillmentMethod, setFulfillmentMethod] =
+    useState<WholesaleFulfillmentMethod>("pickup");
   const [invoiced, setInvoiced] = useState(false);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [delivered, setDelivered] = useState(true);
@@ -105,6 +123,42 @@ export function NuevaVentaClient({
   const selectedMethod = paymentMethods.find((m) => m.name === pago) ?? null;
   const cuotaOptions = selectedMethod?.installments ?? [];
   const showCuotas = cuotaOptions.length > 0;
+  const isWholesale = punto === WHOLESALE_POS;
+
+  function changePunto(next: string): boolean {
+    const wasWholesale = punto === WHOLESALE_POS;
+    if (next === WHOLESALE_POS) {
+      if (items.some((item) => item.isOtherBrand)) {
+        toast.error("La venta mayorista admite únicamente productos Sadaels del catálogo");
+        return false;
+      }
+      setPunto(next);
+      setSaleDiscount(String(wholesaleSettings.discountPercentage));
+      setItems((current) => current.map((item) => ({
+        ...item,
+        price: products.find((product) => product.id === item.productId)?.price ?? item.price,
+        discount: 0,
+      })));
+      setFulfillmentMethod("pickup");
+      setShippingCost("0");
+      if (!wholesaleSettings.stores.includes(wholesaleStore)) setWholesaleStore("");
+    } else if (wasWholesale) {
+      setPunto(next);
+      setSaleDiscount("0");
+      setWholesaleStore("");
+      setFulfillmentMethod("pickup");
+      setShippingCost("0");
+    } else {
+      setPunto(next);
+    }
+    return true;
+  }
+
+  function changeFulfillment(label: string) {
+    const next = wholesaleFulfillmentFromLabel(label);
+    setFulfillmentMethod(next);
+    if (next === "pickup") setShippingCost("0");
+  }
 
   /**
    * Marcar la compra como preventa apaga la entrega, y no es cosmético: el
@@ -157,6 +211,12 @@ export function NuevaVentaClient({
     if (discountFraction < 0 || discountFraction >= 1) {
       return toast.error("Descuento general inválido (0–99%)");
     }
+    if (isWholesale && !wholesaleStore) {
+      return toast.error("Elegí la tienda mayorista");
+    }
+    if (isWholesale && fulfillmentMethod === "shipping" && shippingAmount <= 0) {
+      return toast.error("Ingresá el costo de envío que paga el comprador");
+    }
     if (!Number.isFinite(shippingAmount) || shippingAmount < 0) {
       return toast.error("Costo de envío inválido");
     }
@@ -179,7 +239,8 @@ export function NuevaVentaClient({
       // respuesta perdida), el server devuelve la venta original en vez de
       // registrarla de nuevo y descontar stock dos veces.
       const signature = JSON.stringify({
-        soldAt, saleDiscount, shippingCost, pago, cuotas, punto, invoiced, delivered, preorder, notes,
+        soldAt, saleDiscount, shippingCost, pago, cuotas, punto, wholesaleStore,
+        fulfillmentMethod, invoiced, delivered, preorder, notes,
         custName, custDni, custContact, custAddress,
         items: items.map((it) => [it.article, it.brand, it.qty, it.price, it.discount, it.variantGid]),
         invoiceFile: invoiceFile ? `${invoiceFile.name}:${invoiceFile.size}:${invoiceFile.lastModified}` : null,
@@ -212,6 +273,8 @@ export function NuevaVentaClient({
           paymentMethod: pago,
           installments: showCuotas ? Math.trunc(Number(cuotas)) || cuotaOptions[0] : undefined,
           pos: punto,
+          wholesaleStore: isWholesale ? wholesaleStore : undefined,
+          fulfillmentMethod: isWholesale ? fulfillmentMethod : undefined,
           invoiced,
           invoicePath,
           delivered,
@@ -268,8 +331,12 @@ export function NuevaVentaClient({
     <>
       <div className="flex items-end justify-between gap-6 pt-9 pb-1">
         <div>
-          <Eyebrow className="mb-3">Ventas / Registrar venta</Eyebrow>
-          <h1 className="font-serif text-[44px] leading-none tracking-tight">Registrar venta</h1>
+          <Eyebrow className="mb-3">
+            Ventas / {isWholesale ? "Venta mayorista" : "Registrar venta"}
+          </Eyebrow>
+          <h1 className="font-serif text-[44px] leading-none tracking-tight">
+            {isWholesale ? "Registrar venta mayorista" : "Registrar venta"}
+          </h1>
         </div>
         <div className="flex items-center gap-3 pb-1">
           <Link href="/ventas" className={btnCls("ghost")}>
@@ -280,7 +347,11 @@ export function NuevaVentaClient({
             disabled={saving || !items.length}
             onClick={submit}
           >
-            {saving ? "Guardando…" : "Registrar venta"}
+            {saving
+              ? "Guardando…"
+              : isWholesale
+                ? "Registrar venta mayorista"
+                : "Registrar venta"}
           </button>
         </div>
       </div>
@@ -334,6 +405,10 @@ export function NuevaVentaClient({
               <ProductPicker
                 products={products}
                 brands={brands}
+                wholesale={isWholesale}
+                onWholesaleChange={(enabled) =>
+                  changePunto(enabled ? WHOLESALE_POS : "LOCAL")
+                }
                 onAdd={(it) => setItems((prev) => [...prev, it])}
               />
 
@@ -381,11 +456,12 @@ export function NuevaVentaClient({
                 onChange={(e) => setSoldAt(e.target.value)}
               />
               <Field
-                label="DESCUENTO GENERAL %"
+                label={isWholesale ? "DESCUENTO MAYORISTA SOBRE PVP %" : "DESCUENTO GENERAL %"}
                 type="number"
                 min={0}
                 max={99}
                 value={saleDiscount}
+                disabled={isWholesale}
                 onChange={(e) => setSaleDiscount(e.target.value)}
               />
               <Dropdown label="FORMA DE PAGO" value={pago} options={PAGOS} onChange={changePago} />
@@ -397,20 +473,60 @@ export function NuevaVentaClient({
                   onChange={setCuotas}
                 />
               ) : (
-                <Dropdown label="PUNTO DE VENTA" value={punto} options={PUNTOS} onChange={setPunto} />
+                <Dropdown
+                  label="PUNTO DE VENTA"
+                  value={punto}
+                  options={isWholesale ? [WHOLESALE_POS] : PUNTOS}
+                  onChange={changePunto}
+                />
               )}
               {showCuotas && (
                 <div className="col-span-2">
-                  <Dropdown label="PUNTO DE VENTA" value={punto} options={PUNTOS} onChange={setPunto} />
+                  <Dropdown
+                    label="PUNTO DE VENTA"
+                    value={punto}
+                    options={isWholesale ? [WHOLESALE_POS] : PUNTOS}
+                    onChange={changePunto}
+                  />
                 </div>
+              )}
+
+              {isWholesale && (
+                <>
+                  <div>
+                    <Dropdown
+                      label="TIENDA MAYORISTA"
+                      value={wholesaleStore || NO_WHOLESALE_STORE}
+                      options={[NO_WHOLESALE_STORE, ...wholesaleSettings.stores]}
+                      onChange={(value) => setWholesaleStore(value === NO_WHOLESALE_STORE ? "" : value)}
+                    />
+                  </div>
+                  <div>
+                    <Dropdown
+                      label="ENTREGA"
+                      value={WHOLESALE_FULFILLMENT_LABEL[fulfillmentMethod]}
+                      options={WHOLESALE_FULFILLMENT_OPTIONS}
+                      onChange={changeFulfillment}
+                    />
+                  </div>
+                  <p className="col-span-2 rounded-lg border border-line2 bg-panel px-3.5 py-3 text-[12px] text-mut">
+                    Precio mayorista: {wholesaleSettings.discountPercentage}% de descuento sobre el
+                    PVP. {fulfillmentMethod === "pickup"
+                      ? "Retiro presencial sin costo de envío."
+                      : "El costo de envío se suma al total y queda a cargo del comprador."}
+                  </p>
+                </>
               )}
 
               <div className="col-span-2">
                 <Field
-                  label="COSTO DE ENVÍO"
+                  label={isWholesale && fulfillmentMethod === "shipping"
+                    ? "COSTO DE ENVÍO · A CARGO DEL COMPRADOR"
+                    : "COSTO DE ENVÍO"}
                   type="number"
                   min={0}
                   value={shippingCost}
+                  disabled={isWholesale && fulfillmentMethod === "pickup"}
                   onChange={(e) => setShippingCost(e.target.value)}
                 />
               </div>

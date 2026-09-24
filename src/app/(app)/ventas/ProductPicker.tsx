@@ -61,10 +61,16 @@ export function ProductPicker({
   products,
   brands,
   onAdd,
+  wholesale = false,
+  onWholesaleChange,
 }: {
   products: PickerProduct[];
   brands: ExternalBrand[];
   onAdd: (item: ChosenItem) => void;
+  /** Mayorista usa únicamente catálogo Sadaels, PVP vigente y descuento general. */
+  wholesale?: boolean;
+  /** En Registrar venta, permite elegir Mayorista como tercer tipo de operación. */
+  onWholesaleChange?: (enabled: boolean) => boolean;
 }) {
   const [otherBrand, setOtherBrand] = useState(false);
   const [product, setProduct] = useState<PickerProduct | null>(null);
@@ -146,10 +152,21 @@ export function ProductPicker({
     setDiscount("0");
   }
 
+  function chooseMode(next: "catalog" | "other-brand" | "wholesale") {
+    if (next === "wholesale") {
+      if (!onWholesaleChange?.(true)) return;
+      setOtherBrand(false);
+    } else {
+      if (wholesale && onWholesaleChange && !onWholesaleChange(false)) return;
+      setOtherBrand(next === "other-brand");
+    }
+    reset();
+  }
+
   function add() {
     const qtyNum = Math.trunc(Number(qty)) || 1;
     const priceNum = Number(price);
-    const discountNum = (Number(discount) || 0) / 100;
+    const discountNum = wholesale ? 0 : (Number(discount) || 0) / 100;
 
     if (!otherBrand && !product) return toast.error("Elegí un producto del catálogo");
     if (otherBrand && !freeArticle.trim()) return toast.error("Ingresá el artículo");
@@ -180,23 +197,32 @@ export function ProductPicker({
   return (
     <div className="rounded-lg border border-line2 p-4">
       <div className="inline-flex rounded-full border border-line2 p-0.5">
-        {(["Producto Sadaels", "Otra marca"] as const).map((label, i) => (
+        {[
+          { label: "Producto Sadaels", mode: "catalog" as const, active: !wholesale && !otherBrand },
+          { label: "Otra marca", mode: "other-brand" as const, active: !wholesale && otherBrand },
+          ...(onWholesaleChange
+            ? [{ label: "Venta mayorista", mode: "wholesale" as const, active: wholesale }]
+            : []),
+        ].map((option) => (
           <button
-            key={label}
+            key={option.mode}
             type="button"
-            onClick={() => {
-              setOtherBrand(i === 1);
-              reset();
-            }}
+            onClick={() => chooseMode(option.mode)}
             className={cn(
               "mono rounded-full px-3.5 py-1.5 text-[10px] uppercase tracking-wider transition-colors",
-              (i === 1) === otherBrand ? "bg-ink text-white" : "text-mut hover:text-ink",
+              option.active ? "bg-ink text-white" : "text-mut hover:text-ink",
             )}
           >
-            {label}
+            {option.label}
           </button>
         ))}
       </div>
+
+      {wholesale && (
+        <p className="mono mt-3 text-[10px] uppercase tracking-wider text-mut">
+          Productos Sadaels al PVP vigente · descuento mayorista aplicado a la compra
+        </p>
+      )}
 
       {!otherBrand ? (
         <div className="mt-4">
@@ -353,18 +379,20 @@ export function ProductPicker({
           onChange={(e) => setQty(e.target.value)}
         />
         <Field
-          label="PRECIO UNITARIO"
+          label={wholesale ? "PVP UNITARIO" : "PRECIO UNITARIO"}
           type="number"
           min={0}
           value={price}
+          disabled={wholesale}
           onChange={(e) => setPrice(e.target.value)}
         />
         <Field
-          label="DESCUENTO %"
+          label={wholesale ? "DESCUENTO POR PRENDA %" : "DESCUENTO %"}
           type="number"
           min={0}
           max={99}
-          value={discount}
+          value={wholesale ? "0" : discount}
+          disabled={wholesale}
           onChange={(e) => setDiscount(e.target.value)}
         />
       </div>

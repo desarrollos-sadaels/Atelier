@@ -8,6 +8,11 @@ import { normalizeRole, type Role } from "@/lib/roles";
 import { parsePaymentMethods, DEFAULT_PAYMENT_METHODS, type PaymentMethod } from "@/lib/payments";
 import { parseExternalBrands, DEFAULT_EXTERNAL_BRANDS, type ExternalBrand } from "@/lib/external-brands";
 import { parseNotificationSettings, type NotificationSettings } from "@/lib/notifications";
+import {
+  parseWholesaleSettings,
+  DEFAULT_WHOLESALE_SETTINGS,
+  type WholesaleSettings,
+} from "@/lib/wholesale";
 import { grossProductRevenue, saleItemRevenue, saleTotal, type SaleOrigin } from "@/lib/sales";
 import { workshopSaleKey } from "@/lib/workshop-sales";
 
@@ -22,6 +27,17 @@ export async function getExternalBrands(): Promise<ExternalBrand[]> {
     .eq("key", "external_brands")
     .maybeSingle();
   return parseExternalBrands(data?.value);
+}
+
+export async function getWholesaleSettings(): Promise<WholesaleSettings> {
+  if (!isSupabaseConfigured()) return DEFAULT_WHOLESALE_SETTINGS;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "wholesale_settings")
+    .maybeSingle();
+  return parseWholesaleSettings(data?.value);
 }
 
 const ars = new Intl.NumberFormat("es-AR", {
@@ -489,6 +505,7 @@ export async function getSales(
       `customer_name.ilike.%${term}%`,
       `seller_name.ilike.%${term}%`,
       `shopify_order_name.ilike.%${term}%`,
+      `wholesale_store.ilike.%${term}%`,
     ];
     if (ids.length) clauses.push(`id.in.(${ids.join(",")})`);
     query = query.or(clauses.join(","));

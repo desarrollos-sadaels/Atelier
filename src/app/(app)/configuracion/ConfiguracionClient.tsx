@@ -24,6 +24,12 @@ import {
   parseNotificationSettings,
   type NotificationSettings,
 } from "@/lib/notifications";
+import {
+  DEFAULT_WHOLESALE_SETTINGS,
+  parseWholesaleSettings,
+  validateWholesaleSettings,
+  type WholesaleSettings,
+} from "@/lib/wholesale";
 import { cn } from "@/lib/cn";
 
 type UserRow = { id: string; name: string; email: string; role: Role };
@@ -54,6 +60,7 @@ export function ConfiguracionClient() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [methods, setMethods] = useState<PaymentMethod[]>(DEFAULT_PAYMENT_METHODS);
   const [brands, setBrands] = useState<ExternalBrand[]>(DEFAULT_EXTERNAL_BRANDS);
+  const [wholesale, setWholesale] = useState<WholesaleSettings>(DEFAULT_WHOLESALE_SETTINGS);
   const [notif, setNotif] = useState<NotificationSettings>(DEFAULT_NOTIFICATION_SETTINGS);
 
   useEffect(() => {
@@ -88,6 +95,14 @@ export function ConfiguracionClient() {
       .maybeSingle()
       .then(({ data }) => {
         if (data?.value) setBrands(parseExternalBrands(data.value));
+      });
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "wholesale_settings")
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) setWholesale(parseWholesaleSettings(data.value));
       });
     supabase
       .from("app_settings")
@@ -131,6 +146,7 @@ export function ConfiguracionClient() {
           {tab === "Usuarios y permisos" && <UsuariosPanel users={users} />}
           {tab === "Ventas" && (
             <div className="space-y-6">
+              <WholesaleSettingsPanel initial={wholesale} onSaved={setWholesale} />
               <PagosSettingsPanel initial={methods} />
               <ExternalBrandsPanel initial={brands} onSaved={setBrands} />
             </div>
@@ -145,6 +161,152 @@ export function ConfiguracionClient() {
         </div>
       </div>
     </>
+  );
+}
+
+function WholesaleSettingsPanel({
+  initial,
+  onSaved,
+}: {
+  initial: WholesaleSettings;
+  onSaved: (settings: WholesaleSettings) => void;
+}) {
+  const [settings, setSettings] = useState(initial);
+  const [previous, setPrevious] = useState(initial);
+  const [newStore, setNewStore] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  if (initial !== previous) {
+    setPrevious(initial);
+    setSettings(initial);
+  }
+
+  function addStore() {
+    const name = newStore.trim();
+    if (!name) return toast.error("Ingresá el nombre de la tienda");
+    if (
+      settings.stores.some(
+        (store) => store.toLocaleUpperCase("es-AR") === name.toLocaleUpperCase("es-AR"),
+      )
+    ) {
+      return toast.error("Esa tienda ya existe");
+    }
+    setSettings((current) => ({ ...current, stores: [...current.stores, name] }));
+    setNewStore("");
+  }
+
+  async function save() {
+    if (saving) return;
+    const valid = validateWholesaleSettings(settings);
+    if (!valid) {
+      return toast.error("Revisá el descuento y dejá al menos una tienda sin duplicados");
+    }
+    setSaving(true);
+    const t = toast.loading("Guardando configuración mayorista…");
+    try {
+      const res = await fetch("/api/settings/wholesale", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: valid }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "No se pudo guardar");
+      setSettings(data.settings);
+      onSaved(data.settings);
+      toast.success("Configuración mayorista actualizada", { id: t });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar", { id: t });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between px-6 pt-6">
+        <span className="mono text-[11px] text-mut">Venta mayorista</span>
+        <button className={btnCls("primary", "h-9 text-[12px]")} disabled={saving} onClick={save}>
+          {saving ? "Guardando…" : "Guardar"}
+        </button>
+      </div>
+      <div className="px-6 pb-6 pt-3">
+        <p className="text-[13px] text-mut">
+          El precio mayorista se calcula sobre el PVP vigente. La venta guarda el PVP y el
+          descuento aplicados para conservar el valor histórico. El retiro no suma envío; si se
+          despacha, el costo se cobra íntegramente al comprador.
+        </p>
+
+        <div className="mt-5 max-w-[220px]">
+          <Field
+            label="DESCUENTO SOBRE PVP %"
+            type="number"
+            min={0.01}
+            max={99.99}
+            step={0.01}
+            value={settings.discountPercentage}
+            onChange={(event) =>
+              setSettings((current) => ({
+                ...current,
+                discountPercentage: Number(event.target.value),
+              }))
+            }
+          />
+        </div>
+
+        <div className="mt-6 border-t border-line pt-5">
+          <span className="mono text-[10px] text-mut">TIENDAS MAYORISTAS HABILITADAS</span>
+          <div className="mt-3 space-y-3">
+            {settings.stores.map((store, index) => (
+              <div key={index} className="grid grid-cols-[1fr_28px] items-end gap-3">
+                <Field
+                  label={`TIENDA ${index + 1}`}
+                  value={store}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      stores: current.stores.map((row, i) =>
+                        i === index ? event.target.value : row,
+                      ),
+                    }))
+                  }
+                />
+                <button
+                  type="button"
+                  className="mb-2 grid h-7 w-7 place-items-center rounded-full border border-line2 text-mut hover:border-acc hover:text-acc"
+                  onClick={() =>
+                    setSettings((current) => ({
+                      ...current,
+                      stores: current.stores.filter((_, i) => i !== index),
+                    }))
+                  }
+                  aria-label={`Quitar ${store}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-5 grid grid-cols-[1fr_auto] items-end gap-3 border-t border-line pt-5">
+            <Field
+              label="NUEVA TIENDA"
+              placeholder="Ej: Nueva tienda"
+              value={newStore}
+              onChange={(event) => setNewStore(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  addStore();
+                }
+              }}
+            />
+            <button type="button" className={btnCls("ghost", "h-11")} onClick={addStore}>
+              <Plus className="h-4 w-4" /> Agregar
+            </button>
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }
 

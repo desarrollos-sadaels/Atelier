@@ -9,7 +9,7 @@ const SERIES = [
   { key: "atelier" as const, label: "Atelier", color: "#e2342b" },
   { key: "taller" as const, label: "Taller", color: "#16847b" },
   { key: "shopify" as const, label: "Shopify", color: "#33538f" },
-  { key: "otherBrands" as const, label: "Otras marcas · Sadaels", color: "#7951a7" },
+  { key: "otherBrands" as const, label: "Otras marcas", color: "#7951a7" },
 ];
 const SHIPPING_CHANNELS = [
   { key: "atelierShipping" as const, label: "Atelier" },
@@ -35,10 +35,9 @@ function parseDay(iso: string): Date {
   return new Date(`${iso}T00:00:00`);
 }
 
-export function SalesChart({ data, grossProductAmount, noRateBrandGross = 0 }: {
+export function SalesChart({ data, grossProductAmount }: {
   data: SalesDay[];
   grossProductAmount: number;
-  noRateBrandGross?: number;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const [showTable, setShowTable] = useState(false);
@@ -52,7 +51,6 @@ export function SalesChart({ data, grossProductAmount, noRateBrandGross = 0 }: {
     otherBrands: data.reduce((sum, day) => sum + day.otherBrands, 0),
   };
   const total = totals.atelier + totals.taller + totals.shopify + totals.otherBrands;
-  const brandShare = grossProductAmount - total;
   const shippingTotals = {
     atelierShipping: data.reduce((sum, day) => sum + day.atelierShipping, 0),
     tallerShipping: data.reduce((sum, day) => sum + day.tallerShipping, 0),
@@ -60,13 +58,13 @@ export function SalesChart({ data, grossProductAmount, noRateBrandGross = 0 }: {
   };
   const shippingTotal = shippingTotals.atelierShipping + shippingTotals.tallerShipping + shippingTotals.shopifyShipping;
 
-  if (max === 0 && shippingTotal === 0 && noRateBrandGross === 0 && grossProductAmount === 0) {
+  if (max === 0 && shippingTotal === 0 && grossProductAmount === 0) {
     return (
       <div className="mt-8 grid h-[180px] place-items-center rounded-[4px] border border-dashed border-line">
         <div className="text-center">
           <div className="font-serif text-[20px]">Sin ingresos de productos en los últimos 30 días</div>
           <p className="mono mt-2 text-[11px] text-mut">
-            Se puebla con las ventas de Atelier, Taller, Shopify y otras marcas
+            Se completa al registrar ventas
           </p>
         </div>
       </div>
@@ -83,16 +81,14 @@ export function SalesChart({ data, grossProductAmount, noRateBrandGross = 0 }: {
           <div className="font-serif text-[36px] leading-none tracking-tight">
             {arsFmt.format(total)}
           </div>
-          <div className="mono mt-1 text-[9px] text-mut">INGRESO SADAELS DE PRODUCTOS · SIN ENVÍOS</div>
-          <div className="mono mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[10px] text-mut">
-            <span>VENTAS BRUTAS DE PRODUCTOS {arsFmt.format(grossProductAmount)}</span>
-            <span>{brandShare < 0 ? "+" : "−"}</span>
-            <span>PARTE DE OTRAS MARCAS {arsFmt.format(Math.abs(brandShare))}</span>
-            <span>=</span>
-            <span className="text-ink">INGRESO SADAELS {arsFmt.format(total)}</span>
+          <div className="mono mt-1 text-[9px] uppercase tracking-wide text-mut">
+            Ingreso Sadaels · productos
+          </div>
+          <div className="mono mt-3 text-[10px] uppercase tracking-wide text-mut">
+            Venta bruta {arsFmt.format(grossProductAmount)}
           </div>
           <div className="mono mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-mut">
-            {SERIES.map((s) => (
+            {SERIES.filter((s) => totals[s.key] !== 0).map((s) => (
               <span key={s.key} className="flex items-center gap-1.5">
                 <span
                   aria-hidden
@@ -113,30 +109,23 @@ export function SalesChart({ data, grossProductAmount, noRateBrandGross = 0 }: {
           {showTable ? "Ver gráfico" : "Ver datos"}
         </button>
       </div>
-      {noRateBrandGross !== 0 && (
-        <p className="mono mt-2 text-[10px] text-mut">
-          Dentro de «Otras marcas · Sadaels» ya están incluidos {arsFmt.format(noRateBrandGross)} sin tasa al 100%. No se suman aparte.
-        </p>
-      )}
       <div className="mt-4 flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-line pt-3">
         <span className="mono flex items-center gap-1.5 text-[10px] text-mut">
           <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ background: SHIPPING_COLOR }} />
           ENVÍOS COBRADOS
         </span>
         <span className="font-serif text-[21px] leading-none">{arsFmt.format(shippingTotal)}</span>
-        <span className="mono text-[9px] text-mut">
-          {SHIPPING_CHANNELS.map((channel) => `${channel.label} ${arsFmt.format(shippingTotals[channel.key])}`).join(" · ")}
-        </span>
+        {SHIPPING_CHANNELS.some((channel) => shippingTotals[channel.key] !== 0) && (
+          <span className="mono text-[9px] text-mut">
+            {SHIPPING_CHANNELS.filter((channel) => shippingTotals[channel.key] !== 0)
+              .map((channel) => `${channel.label} ${arsFmt.format(shippingTotals[channel.key])}`)
+              .join(" · ")}
+          </span>
+        )}
       </div>
 
       {showTable ? (
         <div className="mt-5">
-          <p className="mb-3 text-[11px] leading-relaxed text-mut">
-            Total del día = productos propios de Atelier + Taller + Shopify + ingreso Sadaels de otras marcas.
-            Las otras marcas aparecen solo en su columna, aunque la venta se haya cargado en Atelier o Shopify.
-            Se aplica su porcentaje al importe después de descuentos; sin tasa, se cuenta el 100% para Sadaels.
-            Los envíos se muestran aparte.
-          </p>
           <div className="max-h-[200px] overflow-auto">
             <table className="w-full text-left text-[12px]">
               <thead className="mono sticky top-0 bg-bg text-[9px] text-mut">
@@ -279,7 +268,7 @@ export function SalesChart({ data, grossProductAmount, noRateBrandGross = 0 }: {
               <span className="text-right">
                 {active
                   ? `${dayFmt.format(parseDay(active.day))} · ${arsFmt.format(active.shipping)}`
-                  : "ESCALA PROPIA"}
+                  : `TOTAL ${arsFmt.format(shippingTotal)}`}
               </span>
             </div>
             <div className="mt-2 flex h-10 items-end gap-[2px]" onMouseLeave={() => setHover(null)}>

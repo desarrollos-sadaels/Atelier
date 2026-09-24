@@ -159,6 +159,8 @@ export async function GET(req: NextRequest) {
           "Medio de pago",
           "Cuotas",
           "Punto de venta",
+          "Tienda mayorista",
+          "Modalidad mayorista",
           "Entrega",
         ],
         ...lines.map((l) => [
@@ -178,6 +180,8 @@ export async function GET(req: NextRequest) {
           l.paymentMethod,
           l.installments,
           l.pos,
+          l.wholesaleStore,
+          l.fulfillment,
           l.delivery,
         ]),
       ];
@@ -195,14 +199,17 @@ export async function GET(req: NextRequest) {
   const scoped = filterBreakdown(report.rows, { channels, sellerId });
   const totals = sumTotals(scoped);
 
-  // La plata por canal de una cuenta (o del total), en el orden fijo de canales.
+  // Ingreso Sadaels por canal de una cuenta (o del total), en el orden fijo.
   const channelAmounts = (rows: BreakdownRow[]) =>
-    SALE_CHANNELS.map(({ value }) => money(sumTotals(rows.filter((r) => r.channel === value)).total));
+    SALE_CHANNELS.map(({ value }) => money(sumTotals(rows.filter((r) => r.channel === value)).income));
 
   const line = (label: string, t: ReportTotals, rows: BreakdownRow[]): Cell[] => [
     label,
+    money(t.income),
+    money(t.gross),
+    money(t.shipping),
     money(t.total),
-    sharePct(t.total, totals.total),
+    sharePct(t.income, totals.income),
     t.operations,
     t.units,
     t.operations ? Math.round(t.total / t.operations) : null,
@@ -217,12 +224,15 @@ export async function GET(req: NextRequest) {
   const csv: Cell[][] = [
     [
       "Vendedor",
-      "Ventas cobradas · productos y envíos",
+      "Ingreso Sadaels · productos",
+      "Venta bruta · productos",
+      "Envíos cobrados · aparte",
+      "Total cobrado · bruto y envíos",
       "% del total",
       "Operaciones",
       "Unidades",
       "Ticket promedio",
-      ...SALE_CHANNELS.map((c) => c.label),
+      ...SALE_CHANNELS.map((c) => `${c.label} · ingreso Sadaels`),
       "Entregas pendientes",
       "Cambios",
       "Devoluciones",

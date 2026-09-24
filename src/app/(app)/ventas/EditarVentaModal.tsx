@@ -11,9 +11,19 @@ import { createClient } from "@/lib/supabase/client";
 import type { PaymentMethod } from "@/lib/payments";
 import type { Role } from "@/lib/roles";
 import { normalizeOrigin, SALE_ORIGIN_LABEL } from "@/lib/sales";
+import {
+  WHOLESALE_FULFILLMENT_LABEL,
+  WHOLESALE_FULFILLMENT_OPTIONS,
+  WHOLESALE_POS,
+  isWholesaleFulfillmentMethod,
+  wholesaleFulfillmentFromLabel,
+  type WholesaleFulfillmentMethod,
+  type WholesaleSettings,
+} from "@/lib/wholesale";
 import type { SaleWithItems, Seller } from "@/lib/queries";
 
 const SIN_ASIGNAR = "— Sin asignar —";
+const SIN_TIENDA_MAYORISTA = "— Seleccionar tienda —";
 
 /** Los canales por los que puede entrar una venta. */
 export const PUNTOS_DE_VENTA = [
@@ -25,7 +35,7 @@ export const PUNTOS_DE_VENTA = [
   "FASHION X GLOBAL",
   "AMIGOS Y FAMILIA",
   // El reporte cuenta este punto de venta como canal aparte (ver `saleChannel`).
-  "MAYORISTAS",
+  WHOLESALE_POS,
 ];
 
 async function uploadInvoice(file: File): Promise<string> {
@@ -59,6 +69,7 @@ export function EditarVentaModal({
   role,
   sellers,
   paymentMethods,
+  wholesaleSettings,
   currentUserId,
 }: {
   sale: SaleWithItems;
@@ -67,6 +78,7 @@ export function EditarVentaModal({
   role: Role;
   sellers: Seller[];
   paymentMethods: PaymentMethod[];
+  wholesaleSettings: WholesaleSettings;
   currentUserId: string | null;
 }) {
   const router = useRouter();
@@ -74,6 +86,14 @@ export function EditarVentaModal({
 
   const [sellerId, setSellerId] = useState<string | null>(sale.seller_id);
   const [pos, setPos] = useState(sale.pos ?? "LOCAL");
+  const [wholesaleStore, setWholesaleStore] = useState(sale.wholesale_store ?? "");
+  const [fulfillmentMethod, setFulfillmentMethod] = useState<WholesaleFulfillmentMethod>(
+    isWholesaleFulfillmentMethod(sale.fulfillment_method)
+      ? sale.fulfillment_method
+      : Number(sale.shipping_amount) > 0
+        ? "shipping"
+        : "pickup",
+  );
   const [pago, setPago] = useState(sale.payment_method ?? paymentMethods[0]?.name ?? "EFECTIVO");
   const [cuotas, setCuotas] = useState(sale.installments ? String(sale.installments) : "");
   const [custName, setCustName] = useState(sale.customer_name ?? "");
@@ -93,6 +113,8 @@ export function EditarVentaModal({
 
   const selectedMethod = paymentMethods.find((m) => m.name === pago) ?? null;
   const cuotaOptions = selectedMethod?.installments ?? [];
+  const isWholesale = pos.trim().toUpperCase() === WHOLESALE_POS;
+  const wasWholesale = sale.pos?.trim().toUpperCase() === WHOLESALE_POS;
 
   // Un vendedor no puede asignarle la venta a otra persona (podría sacarse de
   // encima una propia o atribuírsela a un compañero). Sí puede quedársela, que
@@ -101,13 +123,27 @@ export function EditarVentaModal({
   // El precio de cada prenda no se edita acá: cambiarlo sin mover inventario
   // desincronizaría el stock. Lo único ajustable a nivel compra es el descuento
   // general ("te hago 10% por llevar dos").
-  const canEditDiscount = role === "admin" && origin === "atelier";
+  const canEditDiscount = role === "admin" && origin === "atelier" && !isWholesale;
 
   const sellerOptions = [SIN_ASIGNAR, ...sellers.map((s) => s.name)];
   const sellerLabel = sellerId ? (sellers.find((s) => s.id === sellerId)?.name ?? sale.seller_name ?? SIN_ASIGNAR) : SIN_ASIGNAR;
 
   const PAGOS = paymentMethods.map((m) => m.name);
-  const posOptions = [...new Set([...PUNTOS_DE_VENTA, ...(sale.pos ? [sale.pos] : [])])];
+  // Una venta existente no se convierte a mayorista desde este modal: al
+  // crearla se fija el PVP de cada prenda. Por la misma razón, una mayorista
+  // tampoco se reclasifica como común: conserva su tipo y permite corregir
+  // únicamente sus datos administrativos.
+  const allowedPoints = wasWholesale
+    ? [WHOLESALE_POS]
+    : PUNTOS_DE_VENTA.filter((point) => point !== WHOLESALE_POS);
+  const posOptions = [...new Set([...allowedPoints, ...(sale.pos ? [sale.pos] : [])])];
+  const wholesaleStoreOptions = [
+    SIN_TIENDA_MAYORISTA,
+    ...wholesaleSettings.stores,
+    ...(sale.wholesale_store && !wholesaleSettings.stores.includes(sale.wholesale_store)
+      ? [sale.wholesale_store]
+      : []),
+  ];
 
   async function save() {
     if (saving) return;
@@ -135,6 +171,11 @@ export function EditarVentaModal({
           address: custAddress.trim() || null,
         },
       };
+      if (isWholesale) {
+        if (!wholesaleStore) throw new Error("Elegí la tienda mayorista");
+        body.wholesaleStore = wholesaleStore;
+        body.fulfillmentMethod = fulfillmentMethod;
+      }
       if (invoicePath) body.invoicePath = invoicePath;
 
       // "Reclamar" y "asignar" son dos permisos distintos y el server los
@@ -150,8 +191,13 @@ export function EditarVentaModal({
         if (discountNum !== Number(sale.sale_discount)) body.saleDiscount = discountNum;
       }
       if (origin === "atelier") {
-        const shipping = Number(shippingAmount) || 0;
+        const shipping = isWholesale && fulfillmentMethod === "pickup"
+          ? 0
+          : Number(shippingAmount) || 0;
         if (!Number.isFinite(shipping) || shipping < 0) throw new Error("Costo de envío inválido");
+        if (isWholesale && fulfillmentMethod === "shipping" && shipping <= 0) {
+          throw new Error("Ingresá el costo de envío que paga el comprador");
+        }
         if (shipping !== Number(sale.shipping_amount)) body.shippingAmount = shipping;
       }
 
@@ -222,6 +268,33 @@ export function EditarVentaModal({
           <Dropdown label="PUNTO DE VENTA" value={pos} options={posOptions} onChange={setPos} />
         </div>
 
+        {isWholesale && (
+          <div className="grid grid-cols-2 gap-4 rounded-lg border border-line2 bg-panel p-4">
+            <Dropdown
+              label="TIENDA MAYORISTA"
+              value={wholesaleStore || SIN_TIENDA_MAYORISTA}
+              options={wholesaleStoreOptions}
+              onChange={(value) =>
+                setWholesaleStore(value === SIN_TIENDA_MAYORISTA ? "" : value)
+              }
+            />
+            <Dropdown
+              label="ENTREGA"
+              value={WHOLESALE_FULFILLMENT_LABEL[fulfillmentMethod]}
+              options={WHOLESALE_FULFILLMENT_OPTIONS}
+              onChange={(label) => {
+                const next = wholesaleFulfillmentFromLabel(label);
+                setFulfillmentMethod(next);
+                if (next === "pickup") setShippingAmount("0");
+              }}
+            />
+            <p className="col-span-2 text-[12px] text-mut">
+              Esta venta conserva el descuento mayorista aplicado al registrarse. El envío se
+              cobra al comprador; el retiro presencial no suma costo.
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-4">
           <Dropdown
             label="MEDIO DE PAGO"
@@ -256,10 +329,13 @@ export function EditarVentaModal({
               />
             )}
             <Field
-              label="COSTO DE ENVÍO"
+              label={isWholesale && fulfillmentMethod === "shipping"
+                ? "COSTO DE ENVÍO · A CARGO DEL COMPRADOR"
+                : "COSTO DE ENVÍO"}
               type="number"
               min={0}
               value={shippingAmount}
+              disabled={isWholesale && fulfillmentMethod === "pickup"}
               onChange={(e) => setShippingAmount(e.target.value)}
             />
           </div>

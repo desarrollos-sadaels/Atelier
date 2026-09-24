@@ -1,3 +1,5 @@
+import { WHOLESALE_POS } from "@/lib/wholesale";
+
 /**
  * Reporte de ventas: rango de fechas, canales, filtros y totales.
  *
@@ -224,7 +226,7 @@ export const CHANNEL_LABEL = Object.fromEntries(
 ) as Record<SaleChannel, string>;
 
 /** Punto de venta que marca una venta mayorista. Lo ofrecen el alta y la edición. */
-export const WHOLESALE_POS = "MAYORISTAS";
+export { WHOLESALE_POS };
 /** Punto de venta con el que el trigger de `workshop_orders` crea las ventas del taller. */
 export const WORKSHOP_POS = "TALLER";
 
@@ -312,7 +314,14 @@ export function reportSearchParams(state: {
 // ---------- totales ----------
 
 export type ReportTotals = {
+  /** Total cobrado al cliente: venta bruta de productos más envíos. */
   total: number;
+  /** Venta de productos después de descuentos, antes de repartir otras marcas. */
+  gross: number;
+  /** Parte de los productos que corresponde a Sadaels. */
+  income: number;
+  /** Envíos cobrados, informados aparte de los productos. */
+  shipping: number;
   units: number;
   operations: number;
   pendingDelivery: number;
@@ -340,6 +349,9 @@ export type ChannelSummary = ReportTotals & { channel: SaleChannel };
 export function emptyTotals(): ReportTotals {
   return {
     total: 0,
+    gross: 0,
+    income: 0,
+    shipping: 0,
     units: 0,
     operations: 0,
     pendingDelivery: 0,
@@ -353,6 +365,9 @@ export function emptyTotals(): ReportTotals {
 
 function addInto(acc: ReportTotals, r: ReportTotals): void {
   acc.total += r.total;
+  acc.gross += r.gross;
+  acc.income += r.income;
+  acc.shipping += r.shipping;
   acc.units += r.units;
   acc.operations += r.operations;
   acc.pendingDelivery += r.pendingDelivery;
@@ -402,7 +417,7 @@ export function groupBySeller(rows: BreakdownRow[]): SellerSummary[] {
     }
     addInto(acc, r);
   }
-  return [...map.values()].sort((a, b) => b.total - a.total);
+  return [...map.values()].sort((a, b) => b.income - a.income);
 }
 
 /** Los cuatro canales, siempre en el mismo orden y con cero si no vendieron: la tabla no salta. */

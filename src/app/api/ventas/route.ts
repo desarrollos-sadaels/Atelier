@@ -4,6 +4,13 @@ import { requireRole } from "@/lib/api-auth";
 import { deductStockForItem } from "@/lib/sales-ops";
 import { isValidInvoicePath } from "@/lib/sales";
 import { findExternalBrand, parseExternalBrands } from "@/lib/external-brands";
+import {
+  WHOLESALE_POS,
+  findWholesaleStore,
+  isWholesaleFulfillmentMethod,
+  parseWholesaleSettings,
+  type WholesaleFulfillmentMethod,
+} from "@/lib/wholesale";
 import type { TablesInsert } from "@/lib/supabase/types";
 
 function str(v: unknown): string | null {
@@ -100,6 +107,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "JSON inválido" }, { status: 400 });
   }
 
+  const supaAdmin = createAdminClient();
+
   const rawItems = Array.isArray(body.items) ? body.items : [];
   if (!rawItems.length) {
     return NextResponse.json({ ok: false, error: "La venta no tiene prendas" }, { status: 400 });
@@ -130,16 +139,81 @@ export async function POST(req: NextRequest) {
   // Preventa: la compra se cobró antes de tener la mercadería.
   const preorder = Boolean(body.preorder);
 
-  const saleDiscount = Number(body.saleDiscount) || 0;
+  const pos = str(body.pos);
+  const isWholesale = pos?.toUpperCase() === WHOLESALE_POS;
+  let saleDiscount = Number(body.saleDiscount) || 0;
   if (saleDiscount < 0 || saleDiscount >= 1) {
     return NextResponse.json({ ok: false, error: "Descuento general inválido" }, { status: 400 });
   }
 
-  const shippingAmount = body.shippingAmount == null || body.shippingAmount === ""
+  let shippingAmount = body.shippingAmount == null || body.shippingAmount === ""
     ? 0
     : Number(body.shippingAmount);
   if (!Number.isFinite(shippingAmount) || shippingAmount < 0) {
     return NextResponse.json({ ok: false, error: "Costo de envío inválido" }, { status: 400 });
+  }
+
+  let wholesaleStore: string | null = null;
+  let fulfillmentMethod: WholesaleFulfillmentMethod | null = null;
+
+  if (isWholesale) {
+    const { data: storedSettings, error: settingsError } = await supaAdmin
+      .from("app_settings")
+      .select("value")
+      .eq("key", "wholesale_settings")
+      .maybeSingle();
+    if (settingsError) {
+      return NextResponse.json({ ok: false, error: settingsError.message }, { status: 500 });
+    }
+
+    const settings = parseWholesaleSettings(storedSettings?.value);
+    wholesaleStore = findWholesaleStore(str(body.wholesaleStore), settings);
+    if (!wholesaleStore) {
+      return NextResponse.json({ ok: false, error: "Tienda mayorista inválida" }, { status: 400 });
+    }
+    if (!isWholesaleFulfillmentMethod(body.fulfillmentMethod)) {
+      return NextResponse.json({ ok: false, error: "Modalidad de entrega inválida" }, { status: 400 });
+    }
+    fulfillmentMethod = body.fulfillmentMethod;
+
+    if (items.some((item) => item.isOtherBrand || !item.productId)) {
+      return NextResponse.json(
+        { ok: false, error: "La venta mayorista admite únicamente productos Sadaels del catálogo" },
+        { status: 400 },
+      );
+    }
+
+    // El cliente muestra el PVP, pero el servidor vuelve a leerlo: el 50% no
+    // puede calcularse sobre un precio alterado desde el navegador.
+    const productIds = [...new Set(items.map((item) => item.productId as string))];
+    const { data: products, error: productsError } = await supaAdmin
+      .from("products")
+      .select("id, price")
+      .in("id", productIds);
+    if (productsError) {
+      return NextResponse.json({ ok: false, error: productsError.message }, { status: 500 });
+    }
+    const pvpById = new Map((products ?? []).map((product) => [product.id, Number(product.price)]));
+    for (const item of items) {
+      const pvp = pvpById.get(item.productId as string);
+      if (!Number.isFinite(pvp) || !pvp || pvp <= 0) {
+        return NextResponse.json(
+          { ok: false, error: `${item.article}: el producto no tiene un PVP válido` },
+          { status: 400 },
+        );
+      }
+      item.price = pvp;
+      item.discount = 0;
+    }
+
+    saleDiscount = settings.discountPercentage / 100;
+    if (fulfillmentMethod === "pickup") shippingAmount = 0;
+    if (fulfillmentMethod === "shipping" && shippingAmount <= 0) {
+      return NextResponse.json(
+        { ok: false, error: "Ingresá el costo de envío a cargo del comprador" },
+        { status: 400 },
+      );
+    }
   }
 
   // El path de la factura lo manda el cliente; después se firma con service_role
@@ -160,9 +234,11 @@ export async function POST(req: NextRequest) {
     customer_address: str(customer.address),
     payment_method: str(body.paymentMethod),
     installments,
-    pos: str(body.pos),
+    pos,
     sale_discount: saleDiscount,
     shipping_amount: shippingAmount,
+    wholesale_store: wholesaleStore,
+    fulfillment_method: fulfillmentMethod,
     invoiced: Boolean(body.invoiced),
     invoice_path: invoicePath,
     preorder,
@@ -176,7 +252,6 @@ export async function POST(req: NextRequest) {
     idempotency_key: idempotencyKey,
   };
 
-  const supaAdmin = createAdminClient();
   if (items.some((item) => item.isOtherBrand)) {
     const { data, error } = await supaAdmin
       .from("app_settings")

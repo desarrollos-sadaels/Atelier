@@ -4,6 +4,12 @@ import { requireRole, type ApiIdentity } from "@/lib/api-auth";
 import { restockItem } from "@/lib/sales-ops";
 import { isValidInvoicePath } from "@/lib/sales";
 import { isMissingWorkshopColumns, workshopOrderIdFromKey } from "@/lib/workshop-sales";
+import {
+  WHOLESALE_POS,
+  findWholesaleStore,
+  isWholesaleFulfillmentMethod,
+  parseWholesaleSettings,
+} from "@/lib/wholesale";
 import type { Tables, TablesUpdate } from "@/lib/supabase/types";
 
 type Supa = ReturnType<typeof createAdminClient>;
@@ -83,7 +89,9 @@ export async function PATCH(
   // el id.
   const { data: sale, error: fetchErr } = await supaAdmin
     .from("sales")
-    .select("id, seller_id, origin, status, idempotency_key")
+    .select(
+      "id, seller_id, origin, status, idempotency_key, pos, sale_discount, shipping_amount, wholesale_store, fulfillment_method",
+    )
     .eq("id", id)
     .maybeSingle();
   if (fetchErr) {
@@ -129,6 +137,8 @@ export async function PATCH(
     "sellerId" in body ||
     "saleDiscount" in body ||
     "shippingAmount" in body ||
+    "wholesaleStore" in body ||
+    "fulfillmentMethod" in body ||
     "customer" in body;
 
   if (liveFields && sale.status !== "active") {
@@ -229,6 +239,80 @@ export async function PATCH(
       return NextResponse.json({ ok: false, error: "Costo de envío inválido" }, { status: 400 });
     }
     patch.shipping_amount = shipping;
+  }
+
+  const targetPos = ("pos" in body ? patch.pos : sale.pos)?.trim().toUpperCase() ?? "";
+  const wasWholesale = sale.pos?.trim().toUpperCase() === WHOLESALE_POS;
+  const isWholesale = targetPos === WHOLESALE_POS;
+
+  if (wasWholesale && !isWholesale) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Una venta mayorista no puede reclasificarse porque conserva su PVP y descuento históricos",
+      },
+      { status: 409 },
+    );
+  }
+
+  if (isWholesale) {
+    if (sale.origin === "shopify") {
+      return NextResponse.json(
+        { ok: false, error: "Las ventas mayoristas se registran desde Atelier, no sobre un pedido Shopify" },
+        { status: 409 },
+      );
+    }
+    if (!wasWholesale) {
+      return NextResponse.json(
+        { ok: false, error: "Para aplicar el PVP mayorista, registrá una nueva venta con el punto MAYORISTAS" },
+        { status: 409 },
+      );
+    }
+
+    const { data: storedSettings, error: settingsError } = await supaAdmin
+      .from("app_settings")
+      .select("value")
+      .eq("key", "wholesale_settings")
+      .maybeSingle();
+    if (settingsError) {
+      return NextResponse.json({ ok: false, error: settingsError.message }, { status: 500 });
+    }
+    const settings = parseWholesaleSettings(storedSettings?.value);
+    const requestedStore = "wholesaleStore" in body
+      ? str(body.wholesaleStore)
+      : sale.wholesale_store;
+    const sameHistoricalStore =
+      requestedStore && sale.wholesale_store &&
+      requestedStore.toLocaleUpperCase("es-AR") === sale.wholesale_store.toLocaleUpperCase("es-AR")
+        ? sale.wholesale_store
+        : null;
+    const wholesaleStore = findWholesaleStore(requestedStore, settings) ?? sameHistoricalStore;
+    if (!wholesaleStore) {
+      return NextResponse.json({ ok: false, error: "Tienda mayorista inválida" }, { status: 400 });
+    }
+
+    const fulfillmentMethod = "fulfillmentMethod" in body
+      ? body.fulfillmentMethod
+      : sale.fulfillment_method;
+    if (!isWholesaleFulfillmentMethod(fulfillmentMethod)) {
+      return NextResponse.json({ ok: false, error: "Modalidad de entrega inválida" }, { status: 400 });
+    }
+    patch.wholesale_store = wholesaleStore;
+    patch.fulfillment_method = fulfillmentMethod;
+    if (fulfillmentMethod === "pickup") {
+      patch.shipping_amount = 0;
+    } else {
+      const shipping = Number(patch.shipping_amount ?? sale.shipping_amount) || 0;
+      if (shipping <= 0) {
+        return NextResponse.json(
+          { ok: false, error: "Ingresá el costo de envío a cargo del comprador" },
+          { status: 400 },
+        );
+      }
+    }
+  } else if ("wholesaleStore" in body || "fulfillmentMethod" in body) {
+    patch.wholesale_store = null;
+    patch.fulfillment_method = null;
   }
 
   // Cliente, envío y notas son datos compartidos con el pedido de Taller. Si

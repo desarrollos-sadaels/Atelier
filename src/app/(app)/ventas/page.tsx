@@ -7,6 +7,7 @@ import {
   getCurrentProfile,
   getPaymentMethods,
   getExternalBrands,
+  getWholesaleSettings,
   getOtherBrandSalesBreakdown,
   getSales,
   getSalesKpis,
@@ -63,7 +64,7 @@ export default async function VentasPage({
 
   // Los KPIs salen de una agregación en la base sobre el mes completo, así que
   // no dependen ni de la página ni de los filtros activos.
-  const [profile, k, sales, movements, sellers, paymentMethods, brands, brandSales] = await Promise.all([
+  const [profile, k, sales, movements, sellers, paymentMethods, brands, wholesaleSettings, brandSales] = await Promise.all([
     getCurrentProfile(),
     getSalesKpis(start, end),
     getSales(start, end, {
@@ -76,6 +77,7 @@ export default async function VentasPage({
     getSellers(),
     getPaymentMethods(),
     getExternalBrands(),
+    getWholesaleSettings(),
     getOtherBrandSalesBreakdown(start, end),
   ]);
   const role = uiRole(profile?.role);
@@ -134,9 +136,14 @@ export default async function VentasPage({
               Reporte
             </Link>
             {role !== "medios" && (
-              <Link href="/ventas/nueva" className={btnCls("primary")}>
-                <Plus className="h-4 w-4" /> Registrar venta
-              </Link>
+              <>
+                <Link href="/ventas/nueva?tipo=mayorista" className={btnCls("ghost")}>
+                  Venta mayorista
+                </Link>
+                <Link href="/ventas/nueva" className={btnCls("primary")}>
+                  <Plus className="h-4 w-4" /> Registrar venta
+                </Link>
+              </>
             )}
           </>
         }
@@ -221,6 +228,7 @@ export default async function VentasPage({
         sellers={sellers}
         paymentMethods={paymentMethods}
         brands={brands}
+        wholesaleSettings={wholesaleSettings}
         currentUserId={profile?.id ?? null}
       />
     </>
