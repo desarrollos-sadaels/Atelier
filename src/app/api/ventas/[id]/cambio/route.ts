@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/api-auth";
 import { deductStockForItem, restockItem } from "@/lib/sales-ops";
-import { exchangeBalance, saleItemNet } from "@/lib/sales";
+import { exchangeBalance, isStocklessPreorder, saleItemNet } from "@/lib/sales";
 import { findExternalBrand, parseExternalBrands } from "@/lib/external-brands";
 import type { TablesInsert } from "@/lib/supabase/types";
 
@@ -28,6 +28,7 @@ type ParsedItem = {
   brand: string | null;
   externalBrandRate: number | null;
   isOtherBrand: boolean;
+  isPreorder: boolean;
   qty: number;
   price: number;
   discount: number;
@@ -60,6 +61,7 @@ function parseItem(raw: unknown, index: number): ParsedItem | { error: string } 
     brand: isOtherBrand ? str(it.brand) : null,
     externalBrandRate: null,
     isOtherBrand,
+    isPreorder: false,
     qty,
     price,
     discount,
@@ -154,6 +156,25 @@ export async function POST(
       }
       item.brand = brand.name;
       item.externalBrandRate = brand.percentage / 100;
+    }
+  }
+  const catalogIds = [...new Set(items.flatMap((item) => item.productId ? [item.productId] : []))];
+  if (catalogIds.length) {
+    const { data: products, error: preorderError } = await supaAdmin
+      .from("products")
+      .select("id, is_preorder")
+      .in("id", catalogIds);
+    if (preorderError) {
+      return NextResponse.json({ ok: false, error: preorderError.message }, { status: 500 });
+    }
+    const preorderByProduct = new Map(
+      (products ?? []).map((product) => [product.id, product.is_preorder]),
+    );
+    for (const item of items) {
+      item.isPreorder = isStocklessPreorder(
+        false,
+        item.productId ? preorderByProduct.get(item.productId) === true : false,
+      );
     }
   }
   const { data: sale, error: fetchErr } = await supaAdmin
@@ -272,6 +293,7 @@ export async function POST(
     price: it.price,
     discount: it.discount,
     stock_deducted: false,
+    is_preorder: it.isPreorder,
   }));
 
   const { data: created, error: insertErr } = await supaAdmin
@@ -339,7 +361,7 @@ export async function POST(
 
   for (const [i, it] of items.entries()) {
     const newId = created[i]?.id;
-    if (!newId || it.isOtherBrand) continue;
+    if (!newId || it.isOtherBrand || it.isPreorder) continue;
     if (!it.productId || !it.inventoryItemId?.startsWith("gid://")) continue;
 
     const result = await deductStockForItem(supaAdmin, {

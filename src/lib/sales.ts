@@ -92,6 +92,14 @@ export function deliveryState(sale: {
   return sale.preorder ? "awaiting" : "pending";
 }
 
+/** Una preventa nunca mueve inventario desde Atelier. */
+export function isStocklessPreorder(
+  salePreorder: boolean,
+  productPreorder: boolean,
+): boolean {
+  return salePreorder || productPreorder;
+}
+
 export const SALE_ORIGIN_LABEL: Record<SaleOrigin, string> = {
   atelier: "Atelier",
   shopify: "Shopify",

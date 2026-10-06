@@ -223,7 +223,9 @@ export function NuevaVentaClient({
 
     // El server revalida contra Shopify. Este flag le dice que el faltante ya
     // se vio y se aceptó, para que no lo reporte como hallazgo.
-    const short = items.filter((it) => it.available !== null && it.available < it.qty);
+    const short = items.filter(
+      (it) => !preorder && !it.isPreorder && it.available !== null && it.available < it.qty,
+    );
     if (short.length) {
       const detail = short
         .map((it) => `${it.article}: hay ${it.available}u y se venden ${it.qty}`)

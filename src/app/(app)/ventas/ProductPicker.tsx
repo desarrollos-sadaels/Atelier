@@ -35,6 +35,7 @@ export type ChosenItem = {
   brand: string | null;
   externalBrandRate: number | null;
   isOtherBrand: boolean;
+  isPreorder: boolean;
   qty: number;
   price: number;
   discount: number;
@@ -186,6 +187,7 @@ export function ProductPicker({
       brand: otherBrand ? selectedBrand!.name : null,
       externalBrandRate: otherBrand ? selectedBrand!.percentage / 100 : null,
       isOtherBrand: otherBrand,
+      isPreorder: otherBrand ? false : product!.isPreorder,
       qty: qtyNum,
       price: priceNum,
       discount: discountNum,
@@ -326,15 +328,18 @@ export function ProductPicker({
                 </>
               )}
 
-              {selectedVariant && !needsVariant && (
+              {selectedVariant && !needsVariant && product && (
                 <p
                   className={cn(
                     "mono mt-3 text-[10px]",
-                    selectedVariant.available < (Math.trunc(Number(qty)) || 1) ? "text-acc" : "text-mut",
+                    !product.isPreorder && selectedVariant.available < (Math.trunc(Number(qty)) || 1)
+                      ? "text-acc"
+                      : "text-mut",
                   )}
                 >
-                  Stock de la variante: {selectedVariant.available}u — al registrar se descuenta
-                  automáticamente.
+                  {product.isPreorder
+                    ? "Pre-order: se registra sin descontar stock."
+                    : `Stock de la variante: ${selectedVariant.available}u — al registrar se descuenta automáticamente.`}
                 </p>
               )}
               {variants && variants.length === 0 && (
