@@ -113,6 +113,131 @@ export type Database = {
         }
         Relationships: []
       }
+      delivery_note_items: {
+        Row: {
+          article: string
+          color: string | null
+          created_at: string
+          delivery_note_id: string
+          discount: number
+          id: string
+          inventory_item_id: string | null
+          product_id: string | null
+          qty: number
+          stock_deducted: boolean
+          talle: string | null
+          unit_price: number
+          variant_gid: string | null
+        }
+        Insert: {
+          article: string
+          color?: string | null
+          created_at?: string
+          delivery_note_id: string
+          discount?: number
+          id?: string
+          inventory_item_id?: string | null
+          product_id?: string | null
+          qty?: number
+          stock_deducted?: boolean
+          talle?: string | null
+          unit_price?: number
+          variant_gid?: string | null
+        }
+        Update: {
+          article?: string
+          color?: string | null
+          created_at?: string
+          delivery_note_id?: string
+          discount?: number
+          id?: string
+          inventory_item_id?: string | null
+          product_id?: string | null
+          qty?: number
+          stock_deducted?: boolean
+          talle?: string | null
+          unit_price?: number
+          variant_gid?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_note_items_delivery_note_id_fkey"
+            columns: ["delivery_note_id"]
+            isOneToOne: false
+            referencedRelation: "delivery_notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_note_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_notes: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          created_by_name: string | null
+          customer_address: string | null
+          customer_contact: string | null
+          customer_name: string
+          id: string
+          issued_at: string
+          loan_due_at: string | null
+          notes: string | null
+          number: number
+          returned_at: string | null
+          status: string
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          created_by_name?: string | null
+          customer_address?: string | null
+          customer_contact?: string | null
+          customer_name: string
+          id?: string
+          issued_at?: string
+          loan_due_at?: string | null
+          notes?: string | null
+          number?: number
+          returned_at?: string | null
+          status?: string
+          type: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          created_by_name?: string | null
+          customer_address?: string | null
+          customer_contact?: string | null
+          customer_name?: string
+          id?: string
+          issued_at?: string
+          loan_due_at?: string | null
+          notes?: string | null
+          number?: number
+          returned_at?: string | null
+          status?: string
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_notes_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invitations: {
         Row: {
           accepted_at: string | null
@@ -387,6 +512,7 @@ export type Database = {
           exchange_payment_method: string | null
           id: string
           is_other_brand: boolean
+          is_preorder: boolean
           price: number
           product_id: string | null
           qty: number
@@ -412,6 +538,7 @@ export type Database = {
           exchange_payment_method?: string | null
           id?: string
           is_other_brand?: boolean
+          is_preorder?: boolean
           price: number
           product_id?: string | null
           qty?: number
@@ -437,6 +564,7 @@ export type Database = {
           exchange_payment_method?: string | null
           id?: string
           is_other_brand?: boolean
+          is_preorder?: boolean
           price?: number
           product_id?: string | null
           qty?: number

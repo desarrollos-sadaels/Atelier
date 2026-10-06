@@ -1,6 +1,6 @@
 import { shopifyAdmin, shopifyAdminPage } from "./client";
 import type { createAdminClient } from "@/lib/supabase/admin";
-import type { TablesInsert } from "@/lib/supabase/types";
+import type { TablesInsert, TablesUpdate } from "@/lib/supabase/types";
 import { saleTotal } from "@/lib/sales";
 
 type Supa = ReturnType<typeof createAdminClient>;
@@ -377,7 +377,7 @@ export async function importOrder(order: ShopifyOrder, supa: Supa): Promise<Impo
 
   const { data: sale, error: findErr } = await supa
     .from("sales")
-    .select("id, delivered")
+    .select("id, delivered, shipping_amount")
     .eq("shopify_order_id", mapped.sale.shopify_order_id!)
     .maybeSingle();
   if (findErr || !sale) {
@@ -388,8 +388,15 @@ export async function importOrder(order: ShopifyOrder, supa: Supa): Promise<Impo
   // despachó, pero si un vendedor lo marcó entregado a mano (retiro en el
   // local) no hay que volver a ponerlo en pendiente porque la orden todavía no
   // tiene fulfillment.
-  if (mapped.sale.delivered && !sale.delivered) {
-    await supa.from("sales").update({ delivered: true }).eq("id", sale.id);
+  const headerPatch: TablesUpdate<"sales"> = {};
+  if (mapped.sale.delivered && !sale.delivered) headerPatch.delivered = true;
+  const mappedShipping = Number(mapped.sale.shipping_amount) || 0;
+  if (Math.abs((Number(sale.shipping_amount) || 0) - mappedShipping) >= 0.005) {
+    headerPatch.shipping_amount = mappedShipping;
+  }
+  if (Object.keys(headerPatch).length) {
+    const { error } = await supa.from("sales").update(headerPatch).eq("id", sale.id);
+    if (error) throw new Error(`No se pudo actualizar la cabecera Shopify: ${error.message}`);
   }
 
   // --- Prendas.

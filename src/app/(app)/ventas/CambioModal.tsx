@@ -64,7 +64,9 @@ export function CambioModal({
   );
   const balance = exchangeBalance(originalNet, replacementNet);
 
-  const shortStock = items.filter((it) => it.available !== null && it.available < it.qty);
+  const shortStock = items.filter(
+    (it) => !it.isPreorder && it.available !== null && it.available < it.qty,
+  );
 
   useEffect(() => {
     if (!open || products) return;

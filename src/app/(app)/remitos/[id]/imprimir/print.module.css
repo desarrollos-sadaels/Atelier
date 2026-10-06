@@ -1,0 +1,54 @@
+.page {
+  margin: 32px auto 0;
+  max-width: 900px;
+}
+
+.sheet {
+  min-height: 1120px;
+  border: 1px solid #d6d3cb;
+  background: #fff;
+  padding: 54px 58px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+@page {
+  size: A4 portrait;
+  margin: 12mm;
+}
+
+@media print {
+  :global(header) {
+    display: none !important;
+  }
+
+  :global(main) {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  :global(main > *) {
+    animation: none !important;
+  }
+
+  .page {
+    margin: 0;
+    max-width: none;
+  }
+
+  .sheet {
+    min-height: auto;
+    border: 0;
+    padding: 0;
+  }
+
+  .actions {
+    display: none;
+  }
+}
+
