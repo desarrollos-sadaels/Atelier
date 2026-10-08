@@ -6,7 +6,14 @@ import {
   getExternalBrands,
   getWholesaleSettings,
 } from "@/lib/queries";
-import { NuevaVentaClient } from "./NuevaVentaClient";
+import { NuevaOperacionClient } from "./NuevaOperacionClient";
+import type { NewOperationType } from "./OperationTypePicker";
+
+function initialOperationType(tipo: string | undefined): NewOperationType {
+  if (tipo === "prestamo") return "loan";
+  if (tipo === "presupuesto") return "quote";
+  return "sale";
+}
 
 export default async function NuevaVentaPage({
   searchParams,
@@ -23,13 +30,14 @@ export default async function NuevaVentaPage({
   ]);
 
   return (
-    <NuevaVentaClient
+    <NuevaOperacionClient
       products={picker}
       sellerName={profile?.name ?? "—"}
       paymentMethods={paymentMethods}
       brands={brands}
       wholesaleSettings={wholesaleSettings}
       initialWholesale={tipo === "mayorista"}
+      initialOperationType={initialOperationType(tipo)}
     />
   );
 }

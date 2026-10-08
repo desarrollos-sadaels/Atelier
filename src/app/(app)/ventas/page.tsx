@@ -141,7 +141,7 @@ export default async function VentasPage({
                   Venta mayorista
                 </Link>
                 <Link href="/ventas/nueva" className={btnCls("primary")}>
-                  <Plus className="h-4 w-4" /> Registrar venta
+                  <Plus className="h-4 w-4" /> Nueva operación
                 </Link>
               </>
             )}

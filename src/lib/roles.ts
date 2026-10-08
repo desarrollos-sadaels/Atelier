@@ -63,7 +63,7 @@ export function navForRole(role: Role): { label: string; href: string }[] {
     { label: "Catálogo", href: "/catalogo" },
     { label: "Ventas", href: "/ventas" },
     { label: "Taller", href: "/taller" },
-    { label: "Remitos", href: "/remitos" },
+    { label: "Documentos", href: "/remitos" },
     { label: "Métricas", href: "/metricas" },
     { label: "Config", href: "/configuracion" },
   ];

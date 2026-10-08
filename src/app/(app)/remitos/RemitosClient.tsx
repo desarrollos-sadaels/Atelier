@@ -1,17 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
-import { Modal } from "@/components/Modal";
-import { Dropdown } from "@/components/Dropdown";
-import { Field, Textarea } from "@/components/forms";
 import { Chip, btnCls } from "@/components/ui";
-import { Plus, X } from "@/components/icons";
-import { ProductPicker, type ChosenItem } from "@/app/(app)/ventas/ProductPicker";
-import type { PickerProduct } from "@/lib/queries";
-import type { ExternalBrand } from "@/lib/external-brands";
+import { Plus } from "@/components/icons";
 import {
   DELIVERY_NOTE_STATUS_LABEL,
   DELIVERY_NOTE_TYPE_LABEL,
@@ -19,10 +14,7 @@ import {
   deliveryNoteNumber,
   type DeliveryNoteRow,
   type DeliveryNoteStatus,
-  type DeliveryNoteType,
 } from "@/lib/delivery-notes";
-
-const TYPE_OPTIONS = ["Remito", "Préstamo", "Presupuesto"];
 
 const ars = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -30,124 +22,23 @@ const ars = new Intl.NumberFormat("es-AR", {
   maximumFractionDigits: 0,
 });
 
-function typeFromLabel(label: string): DeliveryNoteType {
-  if (label === "Préstamo") return "loan";
-  if (label === "Presupuesto") return "quote";
-  return "delivery";
-}
-
 function statusTone(status: DeliveryNoteStatus): "default" | "acc" {
   return status === "issued" ? "acc" : "default";
 }
 
 export function RemitosClient({
   initialRows,
-  products,
-  brands,
-  today,
 }: {
   initialRows: DeliveryNoteRow[];
-  products: PickerProduct[];
-  brands: ExternalBrand[];
-  today: string;
 }) {
   const router = useRouter();
   const [rows, setRows] = useState(initialRows);
   const [previousRows, setPreviousRows] = useState(initialRows);
-  const [open, setOpen] = useState(false);
-  const [typeLabel, setTypeLabel] = useState("Remito");
-  const [issuedAt, setIssuedAt] = useState(today);
-  const [loanDueAt, setLoanDueAt] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [customerContact, setCustomerContact] = useState("");
-  const [customerAddress, setCustomerAddress] = useState("");
-  const [notes, setNotes] = useState("");
-  const [items, setItems] = useState<ChosenItem[]>([]);
-  const [saving, setSaving] = useState(false);
   const [updating, setUpdating] = useState<string | null>(null);
 
   if (initialRows !== previousRows) {
     setPreviousRows(initialRows);
     setRows(initialRows);
-  }
-
-  const type = typeFromLabel(typeLabel);
-  const total = useMemo(
-    () => items.reduce((sum, item) => sum + item.price * (1 - item.discount) * item.qty, 0),
-    [items],
-  );
-
-  function startCreate() {
-    setTypeLabel("Remito");
-    setIssuedAt(today);
-    setLoanDueAt("");
-    setCustomerName("");
-    setCustomerContact("");
-    setCustomerAddress("");
-    setNotes("");
-    setItems([]);
-    setOpen(true);
-  }
-
-  async function save() {
-    if (saving) return;
-    if (!customerName.trim()) return toast.error("Ingresá el nombre del cliente");
-    if (!items.length) return toast.error("Agregá al menos un ítem");
-    const shortStock = type === "loan"
-      ? items.filter(
-          (item) => !item.isPreorder && item.available !== null && item.available < item.qty,
-        )
-      : [];
-    if (shortStock.length) {
-      const detail = shortStock
-        .map((item) => `${item.article}: hay ${item.available}u y se prestan ${item.qty}`)
-        .join("\n");
-      if (!window.confirm(`Stock insuficiente:\n${detail}\n\n¿Emitir el préstamo igual?`)) return;
-    }
-
-    setSaving(true);
-    const notification = toast.loading("Creando remito…");
-    try {
-      const response = await fetch("/api/remitos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type,
-          allowOversell: shortStock.length > 0,
-          issuedAt,
-          loanDueAt: type === "loan" ? loanDueAt || null : null,
-          customerName,
-          customerContact,
-          customerAddress,
-          notes,
-          items: items.map((item) => ({
-            productId: item.productId,
-            inventoryItemId: item.inventoryItemId,
-            variantGid: item.variantGid,
-            article: item.article,
-            color: item.color,
-            talle: item.talle,
-            qty: item.qty,
-            unitPrice: item.price,
-            discount: item.discount,
-          })),
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error(data.error || "No se pudo crear el remito");
-      toast.success(`${DELIVERY_NOTE_TYPE_LABEL[type]} N.º ${deliveryNoteNumber(data.number)} creado`, {
-        id: notification,
-      });
-      if (data.warning) toast.warning(data.warning);
-      setOpen(false);
-      router.refresh();
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "No se pudo crear el remito", {
-        id: notification,
-      });
-    } finally {
-      setSaving(false);
-    }
   }
 
   async function closeNote(row: DeliveryNoteRow, status: "returned" | "cancelled") {
@@ -177,21 +68,21 @@ export function RemitosClient({
     <>
       <PageHeader
         kicker={`Documentos · ${rows.length}`}
-        title="Remitos"
+        title="Documentos"
         actions={
-          <button type="button" className={btnCls("primary")} onClick={startCreate}>
-            <Plus className="h-4 w-4" /> Nuevo remito
-          </button>
+          <Link href="/ventas/nueva?tipo=prestamo" className={btnCls("primary")}>
+            <Plus className="h-4 w-4" /> Nuevo documento
+          </Link>
         }
       />
 
       {rows.length === 0 ? (
         <div className="mt-10 grid place-items-center rounded-[4px] border border-dashed border-line py-20 text-center">
-          <div className="font-serif text-[22px]">Todavía no hay remitos</div>
-          <p className="mono mt-2 text-[11px] text-mut">Entregas, préstamos y presupuestos imprimibles.</p>
-          <button type="button" className={btnCls("primary", "mt-5")} onClick={startCreate}>
+          <div className="font-serif text-[22px]">Todavía no hay documentos</div>
+          <p className="mono mt-2 text-[11px] text-mut">Préstamos y presupuestos imprimibles.</p>
+          <Link href="/ventas/nueva?tipo=prestamo" className={btnCls("primary", "mt-5")}>
             Crear el primero
-          </button>
+          </Link>
         </div>
       ) : (
         <div className="mt-8 overflow-x-auto">
@@ -263,78 +154,6 @@ export function RemitosClient({
         </div>
       )}
 
-      <Modal
-        open={open}
-        onClose={() => setOpen(false)}
-        title="Nuevo documento"
-        subtitle="Se guarda numerado y listo para imprimir"
-        width="lg"
-        footer={
-          <>
-            <button type="button" className={btnCls("ghost")} onClick={() => setOpen(false)}>Cancelar</button>
-            <button type="button" className={btnCls("primary")} disabled={saving} onClick={save}>
-              {saving ? "Guardando…" : "Crear remito"}
-            </button>
-          </>
-        }
-      >
-        <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-4">
-            <Dropdown label="TIPO" value={typeLabel} options={TYPE_OPTIONS} onChange={setTypeLabel} />
-            <Field label="FECHA" type="date" value={issuedAt} onChange={(event) => setIssuedAt(event.target.value)} />
-          </div>
-          {type === "loan" && (
-            <Field
-              label="DEVOLUCIÓN PREVISTA"
-              type="date"
-              value={loanDueAt}
-              onChange={(event) => setLoanDueAt(event.target.value)}
-            />
-          )}
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="CLIENTE" value={customerName} onChange={(event) => setCustomerName(event.target.value)} />
-            <Field label="CONTACTO" value={customerContact} onChange={(event) => setCustomerContact(event.target.value)} />
-          </div>
-          <Field label="DIRECCIÓN" value={customerAddress} onChange={(event) => setCustomerAddress(event.target.value)} />
-
-          <ProductPicker products={products} brands={brands} onAdd={(item) => setItems((current) => [...current, item])} />
-
-          {items.length > 0 && (
-            <div className="border-t border-line">
-              {items.map((item) => (
-                <div key={item.key} className="flex items-center gap-3 border-b border-line py-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-medium">{item.article}</div>
-                    <div className="mono text-[9px] text-mut">
-                      {[item.color, item.talle && `Talle ${item.talle}`, `${item.qty} u`].filter(Boolean).join(" · ")}
-                    </div>
-                  </div>
-                  <div className="font-serif text-[16px]">{ars.format(item.price * (1 - item.discount) * item.qty)}</div>
-                  <button
-                    type="button"
-                    aria-label={`Quitar ${item.article}`}
-                    className="text-mut hover:text-acc"
-                    onClick={() => setItems((current) => current.filter((candidate) => candidate.key !== item.key))}
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-              <div className="flex items-baseline justify-between pt-4">
-                <span className="mono text-[10px] text-mut">TOTAL</span>
-                <span className="font-serif text-[26px]">{ars.format(total)}</span>
-              </div>
-            </div>
-          )}
-
-          <Textarea label="OBSERVACIONES" rows={4} value={notes} onChange={(event) => setNotes(event.target.value)} />
-          {type === "loan" && (
-            <p className="mono rounded-lg border border-line2 bg-panel px-4 py-3 text-[10px] leading-relaxed text-mut">
-              Al emitir el préstamo se descuenta el stock. Al marcarlo devuelto o anularlo, se repone automáticamente.
-            </p>
-          )}
-        </div>
-      </Modal>
     </>
   );
 }

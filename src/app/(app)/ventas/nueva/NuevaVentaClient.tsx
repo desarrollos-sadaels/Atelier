@@ -24,6 +24,7 @@ import type { PickerProduct } from "@/lib/queries";
 import { saleItemNet, saleNet } from "@/lib/sales";
 import { cn } from "@/lib/cn";
 import { ProductPicker, type ChosenItem } from "../ProductPicker";
+import { OperationTypePicker, type NewOperationType } from "./OperationTypePicker";
 
 export type { PickerProduct } from "@/lib/queries";
 
@@ -68,6 +69,8 @@ export function NuevaVentaClient({
   brands,
   wholesaleSettings,
   initialWholesale,
+  operationType,
+  onOperationTypeChange,
 }: {
   products: PickerProduct[];
   sellerName: string;
@@ -75,6 +78,8 @@ export function NuevaVentaClient({
   brands: ExternalBrand[];
   wholesaleSettings: WholesaleSettings;
   initialWholesale: boolean;
+  operationType: NewOperationType;
+  onOperationTypeChange: (type: NewOperationType) => void;
 }) {
   const router = useRouter();
   const PAGOS = paymentMethods.map((m) => m.name);
@@ -331,7 +336,7 @@ export function NuevaVentaClient({
 
   return (
     <>
-      <div className="flex items-end justify-between gap-6 pt-9 pb-1">
+      <div className="flex flex-col gap-6 pb-1 pt-9 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <Eyebrow className="mb-3">
             Ventas / {isWholesale ? "Venta mayorista" : "Registrar venta"}
@@ -340,7 +345,8 @@ export function NuevaVentaClient({
             {isWholesale ? "Registrar venta mayorista" : "Registrar venta"}
           </h1>
         </div>
-        <div className="flex items-center gap-3 pb-1">
+        <div className="flex flex-wrap items-end gap-3 pb-1">
+          <OperationTypePicker value={operationType} onChange={onOperationTypeChange} />
           <Link href="/ventas" className={btnCls("ghost")}>
             Cancelar
           </Link>

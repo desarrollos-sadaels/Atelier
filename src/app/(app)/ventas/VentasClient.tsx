@@ -263,7 +263,7 @@ export function VentasClient({
                 Venta mayorista
               </Link>
               <Link href="/ventas/nueva" className={btnCls("primary")}>
-                Registrar venta
+                Nueva operación
               </Link>
             </div>
           )}
@@ -624,6 +624,14 @@ function SaleRows({
                 Factura ↗
               </a>
             )}
+            <a
+              href={`/api/ventas/${sale.id}/remito`}
+              download
+              className="mono text-[10px] text-acc hover:underline"
+              title="Descargar remito en PDF"
+            >
+              Remito ↓
+            </a>
           </div>
         </td>
         <td className="py-3 text-right align-top">
